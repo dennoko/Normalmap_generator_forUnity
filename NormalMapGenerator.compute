@@ -1,0 +1,303 @@
+#pragma kernel Binarize
+#pragma kernel JFA_Init
+#pragma kernel JFA_Step
+#pragma kernel JFA_Distance
+#pragma kernel ApplyProfile
+#pragma kernel CompositeHeightMap
+#pragma kernel GenerateNormalMap
+
+// ================================================================
+// Shared parameters (set via ComputeShader.SetInt / SetFloat)
+// ================================================================
+int   _Width;
+int   _Height;
+float _Threshold;
+int   _BevelRadius;
+float _Strength;
+int   _ProfileType;    // 0=Linear, 1=Logarithmic, 2=Exponential
+int   _NormalMapType;  // 0=DirectX (Y+), 1=OpenGL (Y-)
+int   _InputMode;      // 0=Threshold, 1=GrayWeight
+int   _InvertMask;     // 0 or 1
+int   _DisableBevel;   // 0 or 1
+int   _JFAStep;        // current step size used in JFA_Step kernel
+
+// ================================================================
+// Texture resources
+// Each kernel uses only the textures it binds via SetTexture()
+// ================================================================
+
+// --- Binarize ---
+Texture2D<float4>  _InputTex;   // RGBA input from Project
+RWTexture2D<float> _BinaryOut;  // binary mask (0.0 or 1.0)
+RWTexture2D<float> _GrayOut;    // grayscale (0.0 – 1.0)
+
+// --- JFA ---
+Texture2D<float>   _BinaryIn;    // binary mask (read-only)
+RWTexture2D<float2> _SeedBufOut; // seed buffer write (pixel coords, or (-1,-1))
+Texture2D<float2>  _SeedBufIn;   // seed buffer read
+
+// --- Distance ---
+RWTexture2D<float> _DistanceOut; // distance to nearest boundary (pixels, clamped)
+
+// --- Profile ---
+Texture2D<float>   _DistanceIn;  // distance map (read-only)
+RWTexture2D<float> _IntensityOut;// profile intensity (0.0 – 1.0)
+
+// --- Composite ---
+Texture2D<float>   _GrayIn;      // grayscale (read-only)
+Texture2D<float>   _IntensityIn; // profile intensity (read-only)
+RWTexture2D<float> _HeightMapOut;// height map output
+
+// --- Normal map ---
+Texture2D<float>   _HeightMapIn; // height map (read-only)
+RWTexture2D<float4> _NormalMapOut; // RGBA normal map output
+
+// ================================================================
+// Helper: apply profile curve to a distance value
+// ================================================================
+float ProfileCurve(float dist)
+{
+    float nd = clamp(dist / (float)_BevelRadius, 0.0, 1.0);
+    if (_ProfileType == 0)       // Linear
+        return nd;
+    else if (_ProfileType == 1)  // Logarithmic
+        return log(1.0 + 9.0 * nd) / log(10.0);
+    else                         // Exponential
+        return (exp(nd * 2.5) - 1.0) / (exp(2.5) - 1.0);
+}
+
+// ================================================================
+// Helper: sample height map with BORDER_REPLICATE (clamp to edge)
+// ================================================================
+float SampleH(int x, int y)
+{
+    x = clamp(x, 0, _Width  - 1);
+    y = clamp(y, 0, _Height - 1);
+    return _HeightMapIn[uint2(x, y)];
+}
+
+// ================================================================
+// Kernel: Binarize
+//   Reads RGBA input, computes grayscale (ITU-R BT.601) and binary mask.
+//   InvertMask flips both gray and binary before writing.
+// ================================================================
+[numthreads(8, 8, 1)]
+void Binarize(uint3 id : SV_DispatchThreadID)
+{
+    if ((int)id.x >= _Width || (int)id.y >= _Height) return;
+
+    float4 c = _InputTex[id.xy];
+    float gray = dot(c.rgb, float3(0.299, 0.587, 0.114));
+
+    if (_InvertMask)
+        gray = 1.0 - gray;
+
+    _GrayOut[id.xy]   = gray;
+    _BinaryOut[id.xy] = (gray > _Threshold) ? 1.0 : 0.0;
+}
+
+// ================================================================
+// Kernel: JFA_Init
+//   Marks boundary pixels (binary=1 with at least one binary=0 neighbour)
+//   as seeds. Writes pixel coordinates to _SeedBufOut.
+//   Non-seed pixels get (-1, -1).
+// ================================================================
+[numthreads(8, 8, 1)]
+void JFA_Init(uint3 id : SV_DispatchThreadID)
+{
+    if ((int)id.x >= _Width || (int)id.y >= _Height) return;
+
+    float center = _BinaryIn[id.xy];
+    bool  isSeed = false;
+
+    if (center >= 0.5)
+    {
+        for (int dy = -1; dy <= 1; dy++)
+        {
+            for (int dx = -1; dx <= 1; dx++)
+            {
+                if (dx == 0 && dy == 0) continue;
+                int nx = (int)id.x + dx;
+                int ny = (int)id.y + dy;
+                // Ignore out-of-bounds neighbours so that image edges
+                // do not trigger bevel generation.
+                if (nx < 0 || nx >= _Width || ny < 0 || ny >= _Height)
+                    continue;
+                if (_BinaryIn[uint2(nx, ny)] < 0.5)
+                    isSeed = true;
+            }
+        }
+    }
+
+    _SeedBufOut[id.xy] = isSeed
+        ? float2((float)id.x, (float)id.y)
+        : float2(-1.0, -1.0);
+}
+
+// ================================================================
+// Kernel: JFA_Step
+//   One pass of Jump Flooding. Each pixel looks at 8 neighbours
+//   at offset ±_JFAStep and keeps the closest seed.
+// ================================================================
+[numthreads(8, 8, 1)]
+void JFA_Step(uint3 id : SV_DispatchThreadID)
+{
+    if ((int)id.x >= _Width || (int)id.y >= _Height) return;
+
+    float2 pos  = float2((float)id.x, (float)id.y);
+    float2 best = _SeedBufIn[id.xy];
+    float  bestDist = (best.x < 0.0) ? 1e20 : distance(pos, best);
+
+    for (int dy = -1; dy <= 1; dy++)
+    {
+        for (int dx = -1; dx <= 1; dx++)
+        {
+            if (dx == 0 && dy == 0) continue;
+            int nx = (int)id.x + dx * _JFAStep;
+            int ny = (int)id.y + dy * _JFAStep;
+            if (nx < 0 || nx >= _Width || ny < 0 || ny >= _Height) continue;
+
+            float2 s = _SeedBufIn[uint2(nx, ny)];
+            if (s.x < 0.0) continue;
+
+            float d = distance(pos, s);
+            if (d < bestDist)
+            {
+                bestDist = d;
+                best = s;
+            }
+        }
+    }
+
+    _SeedBufOut[id.xy] = best;
+}
+
+// ================================================================
+// Kernel: JFA_Distance
+//   Computes L2 distance (pixels) from each pixel to its nearest seed.
+//   Binary=0 pixels are zeroed out; pixels with no seed get bevelRadius.
+// ================================================================
+[numthreads(8, 8, 1)]
+void JFA_Distance(uint3 id : SV_DispatchThreadID)
+{
+    if ((int)id.x >= _Width || (int)id.y >= _Height) return;
+
+    // Background pixels have no bevel
+    if (_BinaryIn[id.xy] < 0.5)
+    {
+        _DistanceOut[id.xy] = 0.0;
+        return;
+    }
+
+    float2 seed = _SeedBufIn[id.xy];
+    if (seed.x < 0.0)
+    {
+        // Interior pixel with no seed → treat as full bevel radius
+        _DistanceOut[id.xy] = (float)_BevelRadius;
+        return;
+    }
+
+    float dist = distance(float2((float)id.x, (float)id.y), seed);
+    _DistanceOut[id.xy] = clamp(dist, 0.0, (float)_BevelRadius);
+}
+
+// ================================================================
+// Kernel: ApplyProfile
+//   Applies the profile curve to each pixel's distance and
+//   simultaneously performs a 3×3 Gaussian blur [1,2,1;2,4,2;1,2,1]/16
+//   by sampling neighbours from _DistanceIn and averaging.
+// ================================================================
+[numthreads(8, 8, 1)]
+void ApplyProfile(uint3 id : SV_DispatchThreadID)
+{
+    if ((int)id.x >= _Width || (int)id.y >= _Height) return;
+
+    // Gaussian kernel weights: (abs(dx)==0 ? 2 : 1) * (abs(dy)==0 ? 2 : 1)
+    float result     = 0.0;
+    float totalWeight = 0.0;
+
+    for (int dy = -1; dy <= 1; dy++)
+    {
+        for (int dx = -1; dx <= 1; dx++)
+        {
+            int nx = clamp((int)id.x + dx, 0, _Width  - 1);
+            int ny = clamp((int)id.y + dy, 0, _Height - 1);
+
+            float dist      = _DistanceIn[uint2(nx, ny)];
+            float intensity = ProfileCurve(dist);
+            float w = (float)((abs(dx) == 0 ? 2 : 1) * (abs(dy) == 0 ? 2 : 1));
+
+            result      += intensity * w;
+            totalWeight += w;
+        }
+    }
+
+    _IntensityOut[id.xy] = result / totalWeight;
+}
+
+// ================================================================
+// Kernel: CompositeHeightMap
+//   Combines the bevel intensity with the base mask.
+//   Threshold mode: base = binary
+//   GrayWeight mode: base = gray
+//   Height = min(base, intensity)  (or just base when bevel disabled)
+// ================================================================
+[numthreads(8, 8, 1)]
+void CompositeHeightMap(uint3 id : SV_DispatchThreadID)
+{
+    if ((int)id.x >= _Width || (int)id.y >= _Height) return;
+
+    float base = (_InputMode == 0)
+        ? _BinaryIn[id.xy]
+        : _GrayIn[id.xy];
+
+    float height;
+    if (_DisableBevel)
+        height = base;
+    else
+        height = min(base, _IntensityIn[id.xy]);
+
+    _HeightMapOut[id.xy] = height;
+}
+
+// ================================================================
+// Kernel: GenerateNormalMap
+//   3×3 Sobel filter with BORDER_REPLICATE on height map.
+//   Packs (X, Y, Z) into RGB with strength / 8.0 scaling.
+// ================================================================
+[numthreads(8, 8, 1)]
+void GenerateNormalMap(uint3 id : SV_DispatchThreadID)
+{
+    if ((int)id.x >= _Width || (int)id.y >= _Height) return;
+
+    int x = (int)id.x;
+    int y = (int)id.y;
+
+    // Sobel X kernel: [-1, 0, +1; -2, 0, +2; -1, 0, +1]
+    float sx =
+        -SampleH(x-1, y-1) + SampleH(x+1, y-1)
+        - 2.0 * SampleH(x-1, y) + 2.0 * SampleH(x+1, y)
+        - SampleH(x-1, y+1) + SampleH(x+1, y+1);
+
+    // Sobel Y kernel: [-1, -2, -1; 0, 0, 0; +1, +2, +1]
+    float sy =
+        -SampleH(x-1, y-1) - 2.0 * SampleH(x, y-1) - SampleH(x+1, y-1)
+        + SampleH(x-1, y+1) + 2.0 * SampleH(x, y+1) + SampleH(x+1, y+1);
+
+    // Scale with strength (theoretical max of 3×3 Sobel = 8.0 for float input)
+    sx = sx * _Strength / 8.0;
+    sy = sy * _Strength / 8.0;
+    float sz = sqrt(max(0.0, 1.0 - sx * sx - sy * sy));
+
+    // Pack into [0, 1] range: R=X, G=Y, B=Z, A=1
+    float r = clamp(0.5 - sx * 0.5, 0.0, 1.0);  // X
+    float b = clamp(0.5 + sz * 0.5, 0.0, 1.0);  // Z
+
+    float g;
+    if (_NormalMapType == 0)   // DirectX (Y+)
+        g = clamp(0.5 - sy * 0.5, 0.0, 1.0);
+    else                       // OpenGL (Y-)
+        g = clamp(0.5 + sy * 0.5, 0.0, 1.0);
+
+    _NormalMapOut[id.xy] = float4(r, g, b, 1.0);
+}
