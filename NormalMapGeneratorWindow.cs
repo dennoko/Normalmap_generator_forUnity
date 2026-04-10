@@ -1,5 +1,6 @@
 using UnityEditor;
 using UnityEngine;
+using System.Collections.Generic;
 
 namespace NormalmapGenerator
 {
@@ -24,6 +25,11 @@ namespace NormalmapGenerator
         // Scroll
         private Vector2 _scroll;
 
+        // Localization
+        private Dictionary<string, string> _locDict = new Dictionary<string, string>();
+        private int _langIndex = 1;
+        private readonly string[] _languages = { "en", "ja" };
+
         // ----------------------------------------------------------------
         // Menu Item
         // ----------------------------------------------------------------
@@ -40,7 +46,35 @@ namespace NormalmapGenerator
         private void OnEnable()
         {
             EditorApplication.update += OnEditorUpdate;
+            _langIndex = EditorPrefs.GetInt("NormalMapGenerator_Lang", 1);
+            if (_langIndex < 0 || _langIndex >= _languages.Length) _langIndex = 1;
+            LoadLocalization(_languages[_langIndex]);
             LoadComputeShader();
+        }
+
+        private void LoadLocalization(string lang)
+        {
+            _locDict.Clear();
+            string path = $"Assets/Editor/Normalmap_generator/Localization/{lang}.json";
+            TextAsset ta = AssetDatabase.LoadAssetAtPath<TextAsset>(path);
+            if (ta != null)
+            {
+                var data = JsonUtility.FromJson<LocData>(ta.text);
+                if (data != null && data.entries != null)
+                {
+                    foreach (var pair in data.entries)
+                    {
+                        if (!string.IsNullOrEmpty(pair.key))
+                            _locDict[pair.key] = pair.value;
+                    }
+                }
+            }
+        }
+
+        private string L(string key)
+        {
+            if (_locDict.TryGetValue(key, out string val)) return val;
+            return key;
         }
 
         private void OnDisable()
@@ -119,22 +153,66 @@ namespace NormalmapGenerator
         // ----------------------------------------------------------------
         private void DrawHeader()
         {
+            Rect rect = GUILayoutUtility.GetRect(0, 40, GUILayout.ExpandWidth(true));
+            // Background color normal map style (blue-purple)
+            EditorGUI.DrawRect(rect, new Color(0.5f, 0.5f, 1.0f));
+
             GUIStyle title = new GUIStyle(EditorStyles.boldLabel)
             {
-                fontSize  = 16,
-                alignment = TextAnchor.MiddleCenter
+                fontSize  = 20,
+                alignment = TextAnchor.MiddleCenter,
+                normal  = { textColor = Color.white },
+                hover   = { textColor = Color.white },
+                active  = { textColor = Color.white },
+                focused = { textColor = Color.white }
             };
-            EditorGUILayout.LabelField("Normal Map Generator", title, GUILayout.Height(28));
+
+            GUIStyle titleOutline = new GUIStyle(title)
+            {
+                normal  = { textColor = Color.black },
+                hover   = { textColor = Color.black },
+                active  = { textColor = Color.black },
+                focused = { textColor = Color.black }
+            };
+
+            string titleText = "Normal Map Generator";
+            
+            // Draw text borders
+            for(int x = -1; x <= 1; x++)
+            {
+                for(int y = -1; y <= 1; y++)
+                {
+                    if (x == 0 && y == 0) continue;
+                    Rect offsetRect = rect;
+                    offsetRect.x += x;
+                    offsetRect.y += y;
+                    GUI.Label(offsetRect, titleText, titleOutline);
+                }
+            }
+            // Draw Main Text
+            GUI.Label(rect, titleText, title);
+
+            // Language Selector
+            Rect langRect = new Rect(rect.xMax - 60, rect.y + 10, 50, 20);
+            EditorGUI.BeginChangeCheck();
+            _langIndex = EditorGUI.Popup(langRect, _langIndex, new string[] { "EN", "JA" });
+            if (EditorGUI.EndChangeCheck())
+            {
+                EditorPrefs.SetInt("NormalMapGenerator_Lang", _langIndex);
+                LoadLocalization(_languages[_langIndex]);
+            }
         }
 
         private void DrawInputSection()
         {
-            EditorGUILayout.LabelField("Input", EditorStyles.boldLabel);
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.LabelField(L("InputHeader"), EditorStyles.boldLabel);
+            EditorGUILayout.Space(2);
             using (new EditorGUI.IndentLevelScope())
             {
                 var prev = _inputTexture;
                 _inputTexture = (Texture2D)EditorGUILayout.ObjectField(
-                    "Mask Texture", _inputTexture, typeof(Texture2D), false);
+                    L("MaskTexture"), _inputTexture, typeof(Texture2D), false);
 
                 if (_inputTexture != prev)
                 {
@@ -142,52 +220,51 @@ namespace NormalmapGenerator
                     _lastChangeTime = EditorApplication.timeSinceStartup;
                 }
             }
+            EditorGUILayout.EndVertical();
         }
 
         private void DrawSettingsSection()
         {
-            EditorGUILayout.LabelField("Settings", EditorStyles.boldLabel);
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.LabelField(L("SettingsHeader"), EditorStyles.boldLabel);
+            EditorGUILayout.Space(2);
             using (new EditorGUI.IndentLevelScope())
             {
-                _settings.InputMode   = (InputMode)EditorGUILayout.EnumPopup("Input Mode", _settings.InputMode);
+                _settings.InputMode   = (InputMode)EditorGUILayout.EnumPopup(L("InputMode"), _settings.InputMode);
 
                 EditorGUILayout.Space(2);
 
-                _settings.Threshold   = EditorGUILayout.Slider("Threshold", _settings.Threshold, 0f, 1f);
-                _settings.InvertMask  = EditorGUILayout.Toggle("Invert Mask", _settings.InvertMask);
+                _settings.Threshold   = EditorGUILayout.Slider(L("Threshold"), _settings.Threshold, 0f, 1f);
+                _settings.InvertMask  = EditorGUILayout.Toggle(L("InvertMask"), _settings.InvertMask);
 
                 EditorGUILayout.Space(4);
 
-                _settings.DisableBevel = EditorGUILayout.Toggle("Disable Bevel", _settings.DisableBevel);
+                _settings.DisableBevel = EditorGUILayout.Toggle(L("DisableBevel"), _settings.DisableBevel);
 
                 using (new EditorGUI.DisabledGroupScope(_settings.DisableBevel))
                 {
-                    _settings.BevelRadius = EditorGUILayout.IntSlider("Bevel Radius (px)", _settings.BevelRadius, 1, 200);
-                    _settings.ProfileType = (ProfileType)EditorGUILayout.EnumPopup("Profile", _settings.ProfileType);
+                    _settings.BevelRadius = EditorGUILayout.IntSlider(L("BevelRadius"), _settings.BevelRadius, 1, 100);
+                    _settings.ProfileType = (ProfileType)EditorGUILayout.EnumPopup(L("Profile"), _settings.ProfileType);
                 }
 
                 EditorGUILayout.Space(4);
 
-                _settings.Strength      = EditorGUILayout.Slider("Strength", _settings.Strength, 0.01f, 10f);
-                _settings.NormalMapType = (NormalMapType)EditorGUILayout.EnumPopup("Normal Type", _settings.NormalMapType);
+                _settings.Strength      = EditorGUILayout.IntSlider(L("Strength"), _settings.Strength, 1, 50);
+                _settings.NormalMapType = (NormalMapType)EditorGUILayout.EnumPopup(L("NormalType"), _settings.NormalMapType);
             }
+            EditorGUILayout.EndVertical();
         }
 
         private void DrawOutputSection()
         {
-            EditorGUILayout.LabelField("Output", EditorStyles.boldLabel);
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.LabelField(L("OutputHeader"), EditorStyles.boldLabel);
+            EditorGUILayout.Space(2);
             using (new EditorGUI.IndentLevelScope())
             {
-                _settings.OverwriteExisting  = EditorGUILayout.Toggle("Overwrite Existing", _settings.OverwriteExisting);
-                _settings.SaveIntermediates  = EditorGUILayout.Toggle("Save Intermediates", _settings.SaveIntermediates);
-
-                if (_settings.SaveIntermediates)
-                {
-                    EditorGUILayout.HelpBox(
-                        "Intermediates: binary, bevel, height maps saved to processing/ subfolder.",
-                        MessageType.Info);
-                }
+                _settings.OverwriteExisting = EditorGUILayout.Toggle(L("OverwriteIfSameName"), _settings.OverwriteExisting);
             }
+            EditorGUILayout.EndVertical();
         }
 
         private void DrawGenerateButton()
@@ -199,23 +276,30 @@ namespace NormalmapGenerator
                 if (_computeShader == null)
                 {
                     EditorGUILayout.HelpBox(
-                        "ComputeShader not found. Make sure NormalMapGenerator.compute is in the project.",
+                        L("ComputeShaderNotFound"),
                         MessageType.Error);
                 }
 
-                GUIStyle btn = new GUIStyle(GUI.skin.button) { fontSize = 13 };
-                if (GUILayout.Button("Generate Normal Map", btn, GUILayout.Height(36)))
+                GUIStyle btn = new GUIStyle(GUI.skin.button) { 
+                    fontSize = 14,
+                    fontStyle = FontStyle.Bold
+                };
+                GUI.backgroundColor = new Color(0.6f, 0.8f, 1.0f);
+                if (GUILayout.Button(L("GenerateBtn"), btn, GUILayout.Height(40)))
                 {
                     GenerateNormalMap();
                 }
+                GUI.backgroundColor = Color.white;
             }
         }
 
         private void DrawPreviewSection()
         {
-            EditorGUILayout.LabelField("Preview", EditorStyles.boldLabel);
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.LabelField(L("PreviewHeader"), EditorStyles.boldLabel);
+            EditorGUILayout.Space(4);
 
-            float availableWidth = EditorGUIUtility.currentViewWidth - 24f;
+            float availableWidth = EditorGUIUtility.currentViewWidth - 24f - 16f;
             float cellWidth  = Mathf.Min(PreviewDisplaySize, (availableWidth - 16f) * 0.5f);
             float cellHeight = cellWidth;
 
@@ -228,12 +312,13 @@ namespace NormalmapGenerator
 
             if (_inputTexture == null)
             {
-                EditorGUILayout.HelpBox("Assign an input texture to see the preview.", MessageType.Info);
+                EditorGUILayout.HelpBox(L("AssignInputTex"), MessageType.Info);
             }
             else if (_processor == null)
             {
-                EditorGUILayout.HelpBox("ComputeShader not loaded.", MessageType.Warning);
+                EditorGUILayout.HelpBox(L("ComputeShaderNotLoaded"), MessageType.Warning);
             }
+            EditorGUILayout.EndVertical();
         }
 
         private void DrawTexturePreview(string label, Texture tex, float w, float h)
@@ -256,7 +341,9 @@ namespace NormalmapGenerator
         }
 
         // ----------------------------------------------------------------
-        // Preview update (512×512 resize → Process)
+        // Preview update
+        //   Resize to PreviewSize while keeping aspect ratio, then process
+        //   with BevelRadius scaled to match the downsampled resolution.
         // ----------------------------------------------------------------
         private void UpdatePreview()
         {
@@ -264,13 +351,33 @@ namespace NormalmapGenerator
 
             ReleasePreviewRT();
 
-            // Resize input to 512×512 via Blit (no isReadable requirement)
-            var previewIn = RenderTexture.GetTemporary(PreviewSize, PreviewSize, 0, RenderTextureFormat.ARGB32);
+            int srcW = _inputTexture.width;
+            int srcH = _inputTexture.height;
+
+            // Compute preview dimensions that preserve aspect ratio
+            int prevW, prevH;
+            if (srcW >= srcH)
+            {
+                prevW = PreviewSize;
+                prevH = Mathf.Max(1, Mathf.RoundToInt(PreviewSize * (float)srcH / srcW));
+            }
+            else
+            {
+                prevH = PreviewSize;
+                prevW = Mathf.Max(1, Mathf.RoundToInt(PreviewSize * (float)srcW / srcH));
+            }
+
+            var previewIn = RenderTexture.GetTemporary(prevW, prevH, 0, RenderTextureFormat.ARGB32);
             Graphics.Blit(_inputTexture, previewIn);
+
+            // Scale BevelRadius proportionally so the preview matches the actual output.
+            // Use max(W,H) as the reference dimension (same axis JFA uses for step count).
+            float scale = (float)Mathf.Max(prevW, prevH) / Mathf.Max(srcW, srcH);
+            var previewSettings = ScaleForPreview(_settings, scale);
 
             try
             {
-                _previewNormalRT = _processor.Process(previewIn, _settings);
+                _previewNormalRT = _processor.Process(previewIn, previewSettings);
             }
             catch (System.Exception ex)
             {
@@ -282,6 +389,31 @@ namespace NormalmapGenerator
             }
         }
 
+        // Returns a copy of settings adjusted for the preview resolution.
+        //
+        // BevelRadius is pixel-based, so it scales linearly with resolution.
+        // Strength must be scaled by the same factor: the Sobel gradient of the
+        // bevel slope is proportional to (1 / BevelRadius), so halving the radius
+        // doubles the gradient. Multiplying Strength by scale keeps the effective
+        // deflection identical to the full-resolution output.
+        //   sx_full    = Strength              / BevelRadius
+        //   sx_preview = (Strength * scale) / (BevelRadius * scale)  ← same
+        private static NormalMapSettings ScaleForPreview(NormalMapSettings src, float scale)
+        {
+            return new NormalMapSettings
+            {
+                InputMode         = src.InputMode,
+                Threshold         = src.Threshold,
+                BevelRadius       = Mathf.Max(1, Mathf.RoundToInt(src.BevelRadius * scale)),
+                Strength          = Mathf.Max(1, Mathf.RoundToInt(src.Strength * scale)),
+                ProfileType       = src.ProfileType,
+                NormalMapType     = src.NormalMapType,
+                InvertMask        = src.InvertMask,
+                DisableBevel      = src.DisableBevel,
+                OverwriteExisting = src.OverwriteExisting,
+            };
+        }
+
         // ----------------------------------------------------------------
         // Generate and save
         // ----------------------------------------------------------------
@@ -291,7 +423,7 @@ namespace NormalmapGenerator
 
             try
             {
-                EditorUtility.DisplayProgressBar("Normal Map Generator", "Processing...", 0.0f);
+                EditorUtility.DisplayProgressBar(L("WindowTitle"), L("GenerateProcessing"), 0.0f);
                 _processor.ProcessAndSave(_inputTexture, _settings);
             }
             catch (System.Exception ex)
@@ -309,6 +441,8 @@ namespace NormalmapGenerator
             Repaint();
         }
 
+
+
         // ----------------------------------------------------------------
         // Cleanup
         // ----------------------------------------------------------------
@@ -320,5 +454,18 @@ namespace NormalmapGenerator
                 _previewNormalRT = null;
             }
         }
+    }
+
+    [System.Serializable]
+    public class LocData
+    {
+        public List<LocPair> entries;
+    }
+
+    [System.Serializable]
+    public class LocPair
+    {
+        public string key;
+        public string value;
     }
 }

@@ -1,0 +1,25 @@
+{
+  "entries": [
+    { "key": "WindowTitle", "value": "Normal Map Generator" },
+    { "key": "Lang", "value": "Language" },
+    { "key": "InputHeader", "value": "Input" },
+    { "key": "MaskTexture", "value": "Mask Texture" },
+    { "key": "SettingsHeader", "value": "Settings" },
+    { "key": "InputMode", "value": "Input Mode" },
+    { "key": "Threshold", "value": "Threshold" },
+    { "key": "InvertMask", "value": "Invert Mask" },
+    { "key": "DisableBevel", "value": "Disable Bevel" },
+    { "key": "BevelRadius", "value": "Bevel Radius (px)" },
+    { "key": "Profile", "value": "Profile" },
+    { "key": "Strength", "value": "Strength" },
+    { "key": "NormalType", "value": "Normal Type" },
+    { "key": "OutputHeader", "value": "Output" },
+    { "key": "OverwriteIfSameName", "value": "Overwrite if file exists" },
+    { "key": "GenerateBtn", "value": "Generate Normal Map" },
+    { "key": "GenerateProcessing", "value": "Processing..." },
+    { "key": "ComputeShaderNotFound", "value": "ComputeShader not found. Make sure NormalMapGenerator.compute is in the project." },
+    { "key": "PreviewHeader", "value": "Preview" },
+    { "key": "AssignInputTex", "value": "Assign an input texture to see the preview." },
+    { "key": "ComputeShaderNotLoaded", "value": "ComputeShader not loaded." }
+  ]
+}

@@ -20,12 +20,11 @@ namespace NormalmapGenerator
         public InputMode    InputMode       = InputMode.Threshold;
         public float        Threshold       = 0.5f;
         public int          BevelRadius     = 15;
-        public float        Strength        = 1.0f;
+        public int          Strength        = 1;
         public ProfileType  ProfileType     = ProfileType.Linear;
         public NormalMapType NormalMapType  = NormalMapType.DirectX;
         public bool         InvertMask      = false;
         public bool         DisableBevel    = false;
-        public bool         SaveIntermediates = false;
         public bool         OverwriteExisting = true;
     }
 
@@ -181,8 +180,7 @@ namespace NormalmapGenerator
             string dir  = Path.GetDirectoryName(assetPath).Replace('\\', '/');
             string name = Path.GetFileNameWithoutExtension(assetPath);
 
-            string outputDir     = dir + "/output";
-            string processingDir = dir + "/processing";
+            string outputDir = dir + "/output";
 
             EnsureDirectory(outputDir);
 
@@ -269,16 +267,6 @@ namespace NormalmapGenerator
             _cs.SetTexture(_kGenerateNormalMap, "_NormalMapOut", normalRT);
             _cs.Dispatch (_kGenerateNormalMap, gx, gy, 1);
 
-            // Save intermediates
-            if (s.SaveIntermediates)
-            {
-                EnsureDirectory(processingDir);
-                SaveGrayscaleRT(binaryRT,    ToPhysicalPath(processingDir + "/" + name + "_binary.png"));
-                if (!s.DisableBevel)
-                    SaveGrayscaleRT(intensityRT, ToPhysicalPath(processingDir + "/" + name + "_bevel.png"));
-                SaveGrayscaleRT(heightRT,    ToPhysicalPath(processingDir + "/" + name + "_height.png"));
-            }
-
             // Save normal map
             SaveColorRT(normalRT, ToPhysicalPath(outputAssetPath));
 
@@ -309,32 +297,6 @@ namespace NormalmapGenerator
             };
             rt.Create();
             return rt;
-        }
-
-        private static void SaveGrayscaleRT(RenderTexture rt, string physicalPath)
-        {
-            // Blit to ARGB32 so ReadPixels works reliably
-            RenderTexture tmp = RenderTexture.GetTemporary(rt.width, rt.height, 0, RenderTextureFormat.ARGB32);
-            Graphics.Blit(rt, tmp);
-
-            RenderTexture prev = RenderTexture.active;
-            RenderTexture.active = tmp;
-            var tex = new Texture2D(rt.width, rt.height, TextureFormat.RGBA32, false);
-            tex.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0);
-            tex.Apply();
-            RenderTexture.active = prev;
-            RenderTexture.ReleaseTemporary(tmp);
-
-            // Map R channel → all channels for proper greyscale PNG
-            Color32[] pixels = tex.GetPixels32();
-            for (int i = 0; i < pixels.Length; i++)
-                pixels[i] = new Color32(pixels[i].r, pixels[i].r, pixels[i].r, 255);
-            tex.SetPixels32(pixels);
-            tex.Apply();
-
-            byte[] bytes = tex.EncodeToPNG();
-            File.WriteAllBytes(physicalPath, bytes);
-            Object.DestroyImmediate(tex);
         }
 
         private static void SaveColorRT(RenderTexture rt, string physicalPath)
