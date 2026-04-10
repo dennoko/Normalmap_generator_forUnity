@@ -307,15 +307,17 @@ namespace NormalmapGenerator
             EditorGUILayout.LabelField(L("PreviewHeader"), EditorStyles.boldLabel);
             EditorGUILayout.Space(4);
 
-            float availableWidth = position.width - 24f - 16f;
+            float availableWidth = EditorGUIUtility.currentViewWidth - 48f;
             float cellWidth  = (availableWidth - 16f) * 0.5f;
             float cellHeight = cellWidth;
 
             using (new EditorGUILayout.HorizontalScope())
             {
+                GUILayout.FlexibleSpace();
                 DrawTexturePreview("Input", _inputTexture, cellWidth, cellHeight);
                 GUILayout.Space(8);
                 DrawTexturePreview("Normal Map", _previewNormalRT, cellWidth, cellHeight);
+                GUILayout.FlexibleSpace();
             }
 
             if (_inputTexture == null)
