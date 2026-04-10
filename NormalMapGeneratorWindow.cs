@@ -19,8 +19,8 @@ namespace NormalmapGenerator
         private bool            _previewDirty;
         private double          _lastChangeTime;
         private const double    DebounceSeconds = 0.6;
-        private const int       PreviewSize     = 512;
-        private const int       PreviewDisplaySize = 256;
+        private float           _lastWindowWidth;
+        private const int       MaxPreviewSize = 4096;
 
         // Scroll
         private Vector2 _scroll;
@@ -123,6 +123,14 @@ namespace NormalmapGenerator
         // ----------------------------------------------------------------
         private void OnGUI()
         {
+            float currentWidth = position.width;
+            if (Mathf.Abs(currentWidth - _lastWindowWidth) > 1f)
+            {
+                _lastWindowWidth = currentWidth;
+                _previewDirty    = true;
+                _lastChangeTime  = EditorApplication.timeSinceStartup;
+            }
+
             EditorGUI.BeginChangeCheck();
 
             _scroll = EditorGUILayout.BeginScrollView(_scroll);
@@ -299,8 +307,8 @@ namespace NormalmapGenerator
             EditorGUILayout.LabelField(L("PreviewHeader"), EditorStyles.boldLabel);
             EditorGUILayout.Space(4);
 
-            float availableWidth = EditorGUIUtility.currentViewWidth - 24f - 16f;
-            float cellWidth  = Mathf.Min(PreviewDisplaySize, (availableWidth - 16f) * 0.5f);
+            float availableWidth = position.width - 24f - 16f;
+            float cellWidth  = (availableWidth - 16f) * 0.5f;
             float cellHeight = cellWidth;
 
             using (new EditorGUILayout.HorizontalScope())
@@ -354,17 +362,20 @@ namespace NormalmapGenerator
             int srcW = _inputTexture.width;
             int srcH = _inputTexture.height;
 
+            // Use half window width as the target resolution for the preview, capped at 4k.
+            int targetRes = Mathf.Clamp(Mathf.RoundToInt(position.width * 0.5f), 256, MaxPreviewSize);
+
             // Compute preview dimensions that preserve aspect ratio
             int prevW, prevH;
             if (srcW >= srcH)
             {
-                prevW = PreviewSize;
-                prevH = Mathf.Max(1, Mathf.RoundToInt(PreviewSize * (float)srcH / srcW));
+                prevW = targetRes;
+                prevH = Mathf.Max(1, Mathf.RoundToInt(targetRes * (float)srcH / srcW));
             }
             else
             {
-                prevH = PreviewSize;
-                prevW = Mathf.Max(1, Mathf.RoundToInt(PreviewSize * (float)srcW / srcH));
+                prevH = targetRes;
+                prevW = Mathf.Max(1, Mathf.RoundToInt(targetRes * (float)srcW / srcH));
             }
 
             var previewIn = RenderTexture.GetTemporary(prevW, prevH, 0, RenderTextureFormat.ARGB32);
