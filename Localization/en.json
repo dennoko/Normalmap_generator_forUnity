@@ -1,6 +1,6 @@
 {
   "entries": [
-    { "key": "WindowTitle", "value": "Normal Map Generator" },
+    { "key": "WindowTitle", "value": "Normalmap Generator" },
     { "key": "Lang", "value": "Language" },
     { "key": "InputHeader", "value": "Input" },
     { "key": "MaskTexture", "value": "Mask Texture" },
@@ -17,7 +17,7 @@
     { "key": "OverwriteIfSameName", "value": "Overwrite if file exists" },
     { "key": "GenerateBtn", "value": "Generate Normal Map" },
     { "key": "GenerateProcessing", "value": "Processing..." },
-    { "key": "ComputeShaderNotFound", "value": "ComputeShader not found. Make sure NormalMapGenerator.compute is in the project." },
+    { "key": "ComputeShaderNotFound", "value": "ComputeShader not found. Make sure NormalmapGenerator.compute is in the project." },
     { "key": "PreviewHeader", "value": "Preview" },
     { "key": "AssignInputTex", "value": "Assign an input texture to see the preview." },
     { "key": "ComputeShaderNotLoaded", "value": "ComputeShader not loaded." }

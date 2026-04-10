@@ -1,6 +1,6 @@
 {
   "entries": [
-    { "key": "WindowTitle", "value": "ノーマルマップジェネレーター" },
+    { "key": "WindowTitle", "value": "Normalmap Generator" },
     { "key": "Lang", "value": "Language" },
     { "key": "InputHeader", "value": "入力 (Input)" },
     { "key": "MaskTexture", "value": "マスク用テクスチャ" },
@@ -17,7 +17,7 @@
     { "key": "OverwriteIfSameName", "value": "同名ファイルを上書き" },
     { "key": "GenerateBtn", "value": "ノーマルマップを生成" },
     { "key": "GenerateProcessing", "value": "処理中..." },
-    { "key": "ComputeShaderNotFound", "value": "ComputeShaderが見つかりません。NormalMapGenerator.computeがプロジェクトにあるか確認してください。" },
+    { "key": "ComputeShaderNotFound", "value": "ComputeShaderが見つかりません。NormalmapGenerator.computeがプロジェクトにあるか確認してください。" },
     { "key": "PreviewHeader", "value": "プレビュー (Preview)" },
     { "key": "AssignInputTex", "value": "プレビューを表示するには入力テクスチャを割り当ててください。" },
     { "key": "ComputeShaderNotLoaded", "value": "ComputeShaderがロードされていません。" }

@@ -33,10 +33,10 @@ namespace NormalmapGenerator
         // ----------------------------------------------------------------
         // Menu Item
         // ----------------------------------------------------------------
-        [MenuItem("dennokoworks/Normal Map Generator")]
+        [MenuItem("dennokoworks/Normalmap Generator")]
         public static void ShowWindow()
         {
-            var win = GetWindow<NormalMapGeneratorWindow>("Normal Map Generator");
+            var win = GetWindow<NormalMapGeneratorWindow>("Normalmap Generator");
             win.minSize = new Vector2(560, 700);
         }
 
@@ -183,7 +183,7 @@ namespace NormalmapGenerator
                 focused = { textColor = Color.black }
             };
 
-            string titleText = "Normal Map Generator";
+            string titleText = "Normalmap Generator";
             
             // Draw text borders
             for(int x = -1; x <= 1; x++)
