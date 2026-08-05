@@ -1,0 +1,112 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+
+    <!-- ヘッダー: タイトル + バージョン + 言語切り替え -->
+    <ui:VisualElement class="dennoko-header">
+        <ui:VisualElement class="dennoko-header-titlegroup">
+            <ui:Label text="NORMALMAP GENERATOR" class="dennoko-title" />
+            <ui:Label name="version-label" text="" class="dennoko-version-label" />
+            <ui:Button name="version-reload-button" text="↻" class="dennoko-version-reload-button" />
+        </ui:VisualElement>
+        <ui:VisualElement class="nmg-lang-group">
+            <ui:Button name="lang-en" text="EN" class="nmg-lang-button" />
+            <ui:Button name="lang-ja" text="JA" class="nmg-lang-button" />
+        </ui:VisualElement>
+    </ui:VisualElement>
+    <ui:VisualElement class="dennoko-separator" />
+
+    <!-- プレビュー (上部固定。スクロールしない) -->
+    <ui:VisualElement class="dennoko-card nmg-card-flush nmg-pinned">
+        <ui:VisualElement class="dennoko-toolbar nmg-toolbar">
+            <ui:Label name="preview-title" text="PREVIEW"
+                class="dennoko-section-title nmg-col-grow" />
+            <ui:Label name="preview-cap-label" text="Max"
+                class="dennoko-section-title nmg-toolbar-label" />
+            <ui:DropdownField name="preview-cap-dropdown" class="nmg-cap-dropdown" />
+            <ui:Button name="auto-update-button" text="Auto Update" class="nmg-toolbar-button" />
+            <ui:Button name="update-button" text="Update" class="nmg-toolbar-button" />
+        </ui:VisualElement>
+
+        <ui:VisualElement class="nmg-preview-row">
+            <ui:VisualElement class="nmg-preview-pane nmg-preview-pane--left">
+                <ui:Label name="preview-input-caption" text="Input" class="nmg-caption" />
+                <ui:VisualElement name="preview-input-canvas" class="nmg-preview-canvas">
+                    <ui:Label name="preview-input-placeholder" text="—"
+                        class="nmg-preview-placeholder" />
+                    <ui:IMGUIContainer name="preview-input-imgui" class="nmg-preview-imgui" />
+                </ui:VisualElement>
+            </ui:VisualElement>
+
+            <ui:VisualElement class="nmg-preview-pane nmg-preview-pane--right">
+                <ui:Label name="preview-output-caption" text="Normal Map" class="nmg-caption" />
+                <ui:VisualElement name="preview-output-canvas" class="nmg-preview-canvas">
+                    <ui:Label name="preview-output-placeholder" text="—"
+                        class="nmg-preview-placeholder" />
+                    <ui:IMGUIContainer name="preview-output-imgui" class="nmg-preview-imgui" />
+                </ui:VisualElement>
+            </ui:VisualElement>
+        </ui:VisualElement>
+
+        <ui:Label name="preview-hint" text="" class="nmg-hint" />
+    </ui:VisualElement>
+
+    <ui:VisualElement class="dennoko-separator" />
+
+    <!-- 設定エリア (スクロール可能)。ウィンドウ縮小時はここだけが縮む -->
+    <ui:ScrollView class="dennoko-scroll">
+
+        <!-- 入力 -->
+        <ui:VisualElement class="dennoko-card">
+            <ui:Label name="input-title" text="INPUT"
+                class="dennoko-section-title dennoko-card-header" />
+            <uie:ObjectField name="input-texture-field" label="Mask Texture"
+                type="UnityEngine.Texture2D, UnityEngine.CoreModule" />
+        </ui:VisualElement>
+
+        <!-- 設定 -->
+        <ui:VisualElement class="dennoko-card">
+            <ui:Label name="settings-title" text="SETTINGS"
+                class="dennoko-section-title dennoko-card-header" />
+            <uie:EnumField name="input-mode-field" label="Input Mode" />
+            <ui:Slider name="threshold-slider" label="Threshold"
+                low-value="0" high-value="1" value="0.5" show-input-field="true" />
+            <ui:Toggle name="invert-mask-toggle" label="Invert Mask" />
+            <ui:VisualElement class="dennoko-separator" />
+            <ui:Slider name="strength-slider" label="Strength"
+                low-value="0.1" high-value="50" value="1" show-input-field="true" />
+            <uie:EnumField name="normal-type-field" label="Normal Type" />
+            <ui:Toggle name="dither-toggle" label="Dither" />
+        </ui:VisualElement>
+
+        <!-- ベベル (ON/OFF トグル付き) -->
+        <ui:VisualElement class="dennoko-card">
+            <ui:VisualElement class="dennoko-card-header dennoko-toggle-header">
+                <ui:Toggle name="bevel-toggle" text="BEVEL" value="true"
+                    class="dennoko-section-title" />
+                <ui:Button name="bevel-reset" text="Reset" class="nmg-toolbar-button" />
+            </ui:VisualElement>
+            <ui:VisualElement name="bevel-content" class="nmg-indent">
+                <ui:SliderInt name="bevel-radius-slider" label="Bevel Radius (px)"
+                    low-value="1" high-value="100" value="15" show-input-field="true" />
+                <uie:EnumField name="profile-field" label="Profile" />
+            </ui:VisualElement>
+        </ui:VisualElement>
+
+    </ui:ScrollView>
+
+    <ui:VisualElement class="dennoko-separator" />
+
+    <!-- フッター (出力設定とアクション) -->
+    <ui:VisualElement class="dennoko-card dennoko-footer">
+        <ui:VisualElement class="dennoko-card-header nmg-row-spread">
+            <ui:Label name="output-title" text="OUTPUT" class="dennoko-section-title nmg-col-grow" />
+            <ui:Toggle name="overwrite-toggle" text="Overwrite if file exists" value="true" />
+        </ui:VisualElement>
+        <ui:Label name="compute-warning" text="" class="nmg-hint dennoko-text-warning nmg-hidden" />
+        <ui:Button name="generate-button" text="Generate Normal Map" class="dennoko-button-primary" />
+        <ui:Button name="reset-all-button" text="Reset All" class="dennoko-button-secondary" />
+    </ui:VisualElement>
+
+    <!-- ステータスバー -->
+    <ui:Label name="status-label" text="Ready" class="dennoko-status" />
+
+</ui:UXML>

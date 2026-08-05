@@ -33,6 +33,10 @@
     { "key": "PreviewPending",        "value": "プレビュー生成中..." },
     { "key": "AssignInputTex",        "value": "プレビューを表示するには入力テクスチャを割り当ててください。" },
     { "key": "ComputeShaderNotFound", "value": "ComputeShaderが見つかりません。NormalmapGenerator.computeがプロジェクトにあるか確認してください。" },
-    { "key": "ComputeShaderNotLoaded","value": "ComputeShaderがロードされていません。" }
+    { "key": "ComputeShaderNotLoaded","value": "ComputeShaderがロードされていません。" },
+    { "key": "VersionUpdateAvailable","value": "更新あり {0}" },
+    { "key": "VersionCheckFailed",    "value": "最新版を取得できません" },
+    { "key": "VersionChecking",       "value": "確認中..." },
+    { "key": "VersionRecheck",        "value": "アップデートを再確認" }
   ]
 }

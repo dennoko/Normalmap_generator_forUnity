@@ -33,6 +33,10 @@
     { "key": "PreviewPending",        "value": "Building preview..." },
     { "key": "AssignInputTex",        "value": "Assign an input texture to see the preview." },
     { "key": "ComputeShaderNotFound", "value": "ComputeShader not found. Make sure NormalmapGenerator.compute is in the project." },
-    { "key": "ComputeShaderNotLoaded","value": "ComputeShader not loaded." }
+    { "key": "ComputeShaderNotLoaded","value": "ComputeShader not loaded." },
+    { "key": "VersionUpdateAvailable","value": "update available {0}" },
+    { "key": "VersionCheckFailed",    "value": "update check failed" },
+    { "key": "VersionChecking",       "value": "checking..." },
+    { "key": "VersionRecheck",        "value": "Check for updates again" }
   ]
 }

@@ -1,11 +1,19 @@
 using UnityEditor;
+using UnityEditor.UIElements;
 using UnityEngine;
+using UnityEngine.UIElements;
 using System.Collections.Generic;
+using DennokoVersionChecker = Dennoko.NormalmapGenerator.DennokoVersionChecker;
 
 namespace NormalmapGenerator
 {
     public class NormalMapGeneratorWindow : EditorWindow
     {
+        // ── Assets (UI/*.meta の GUID) ───────────────────────────────────────
+        private const string UXML_GUID       = "9e4a7c2d1b8f43a6b5c9e0d3f7a2b184";
+        private const string THEME_USS_GUID  = "7b3c1e9a4d2f4b8e9c6a1d5f3e8b2c47";
+        private const string WINDOW_USS_GUID = "2f8d6a3b5c1e4f7a8b9d0c2e6f4a1b39";
+
         // ── State ────────────────────────────────────────────────────────────
         private Texture2D         _inputTexture;
         private NormalMapSettings _settings = new NormalMapSettings();
@@ -34,35 +42,57 @@ namespace NormalmapGenerator
         private double _debounce = HeavyDebounceSeconds;
         private bool   _autoUpdatePreview = true;
 
-        // Change detection
-        private NormalMapSettings _pendingSnapshot;   // last state seen by OnGUI
-        private NormalMapSettings _appliedSnapshot;   // state the preview was built from
-        private Texture2D _pendingTexture, _appliedTexture;
-        private int       _pendingCap = -1, _appliedCap = -1;
+        // State the preview was built from (drives the light/heavy debounce split)
+        private NormalMapSettings _appliedSnapshot;
+        private Texture2D _appliedTexture;
+        private int       _appliedCap = -1;
 
         // Preview view transform (shared by both panes)
         private float   _zoom = 1f;
         private Vector2 _viewCenter = new Vector2(0.5f, 0.5f);
         private const float MaxZoom = 32f;
 
-        // Scroll
-        private Vector2 _scroll;
-
         // Status
         public enum StatusType { Info, Success, Error, Warning }
-        private string     _statusMessage   = "Ready";
-        private StatusType _statusType      = StatusType.Info;
-        private double     _statusResetTime = -1.0;
+        private IVisualElementScheduledItem _statusResetSchedule;
+
+        // Version / update check
+        // ⚠ フィールド初期化子で NormalmapGeneratorVersion.Current を呼ばないこと。
+        //    ScriptableObject のコンストラクタから GUIDToAssetPath が呼ばれ UnityException になる。
+        //    実際のローカル版は CreateGUI 後の LoadVersionResultFromSessionState() で解決する。
+        private DennokoVersionChecker.Result _versionResult = new DennokoVersionChecker.Result
+        {
+            State = DennokoVersionChecker.State.Checking,
+            LocalVersion = "0.0.0",
+        };
 
         // Localization
         private Dictionary<string, string> _locDict = new Dictionary<string, string>();
         private int _langIndex = 1;
         private readonly string[] _languages = { "en", "ja" };
+        private const string PrefKeyLang = "NormalMapGenerator_Lang";
+
+        // ── UI references ────────────────────────────────────────────────────
+        private Label  _previewTitle, _previewCapLabel, _previewInputCaption, _previewHint;
+        private Label  _inputTitle, _settingsTitle, _outputTitle,
+                       _computeWarning, _statusLabel;
+        private Label  _inputPlaceholder, _outputPlaceholder, _versionLabel;
+        private DropdownField _capDropdown;
+        private Button _langEnButton, _langJaButton, _autoUpdateButton, _updateButton,
+                       _bevelResetButton, _generateButton, _resetAllButton, _versionReloadButton;
+        private ObjectField _inputField;
+        private EnumField   _inputModeField, _normalTypeField, _profileField;
+        private Slider      _thresholdSlider, _strengthSlider;
+        private SliderInt   _bevelRadiusSlider;
+        private Toggle      _invertMaskToggle, _ditherToggle, _bevelToggle, _overwriteToggle;
+        private VisualElement _bevelContent, _inputCanvas, _outputCanvas;
+        private IMGUIContainer _inputImgui, _outputImgui;
 
         [MenuItem("dennokoworks/Normalmap Generator")]
         public static void ShowWindow()
         {
-            var win = GetWindow<NormalMapGeneratorWindow>("Normalmap Generator");
+            var win = GetWindow<NormalMapGeneratorWindow>();
+            win.titleContent = new GUIContent("Normalmap Generator");
             win.minSize = new Vector2(560, 700);
         }
 
@@ -70,7 +100,7 @@ namespace NormalmapGenerator
         private void OnEnable()
         {
             EditorApplication.update += OnEditorUpdate;
-            _langIndex = EditorPrefs.GetInt("NormalMapGenerator_Lang", 1);
+            _langIndex = EditorPrefs.GetInt(PrefKeyLang, 1);
             if (_langIndex < 0 || _langIndex >= _languages.Length) _langIndex = 1;
             _previewCap = EditorPrefs.GetInt(PrefKeyCap, 2048);
             if (System.Array.IndexOf(CapValues, _previewCap) < 0) _previewCap = 2048;
@@ -96,6 +126,251 @@ namespace NormalmapGenerator
             _previewCtx = null;
         }
 
+        // ── CreateGUI ────────────────────────────────────────────────────────
+        public void CreateGUI()
+        {
+            VisualElement root = rootVisualElement;
+
+            // テーマ非依存のためのルートクラス。USS 変数の定義元でもある
+            root.AddToClassList("dennoko-root");
+            // USS ロード失敗時も背景が明るくならないよう Surface0 を C# 側でも保証
+            root.style.backgroundColor = (Color)new Color32(0x12, 0x12, 0x12, 0xFF);
+            root.style.flexGrow = 1;
+
+            // 標準フォント (OS のメイリオ)。生成・保護・再適用は DennokoUIFont に集約
+            DennokoUIFont.Apply(root);
+
+            AddStyleSheet(root, THEME_USS_GUID);
+            AddStyleSheet(root, WINDOW_USS_GUID);
+
+            string uxmlPath = AssetDatabase.GUIDToAssetPath(UXML_GUID);
+            var uxml = string.IsNullOrEmpty(uxmlPath)
+                ? null
+                : AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(uxmlPath);
+            if (uxml == null)
+            {
+                root.Add(new Label($"UXML Asset が見つかりません。GUID を確認してください: {UXML_GUID}"));
+                return;
+            }
+            uxml.CloneTree(root);
+
+            InitializeUI(root);
+        }
+
+        private void AddStyleSheet(VisualElement root, string guid)
+        {
+            string path = AssetDatabase.GUIDToAssetPath(guid);
+            var uss = string.IsNullOrEmpty(path)
+                ? null
+                : AssetDatabase.LoadAssetAtPath<StyleSheet>(path);
+            if (uss != null) root.styleSheets.Add(uss);
+            else Debug.LogWarning($"[{nameof(NormalMapGeneratorWindow)}] USS が見つかりません。GUID を確認してください: {guid}");
+        }
+
+        // ── Binding ──────────────────────────────────────────────────────────
+        private void InitializeUI(VisualElement root)
+        {
+            _statusLabel          = root.Q<Label>("status-label");
+            _previewTitle         = root.Q<Label>("preview-title");
+            _previewCapLabel      = root.Q<Label>("preview-cap-label");
+            _previewInputCaption  = root.Q<Label>("preview-input-caption");
+            _previewHint          = root.Q<Label>("preview-hint");
+            _inputTitle           = root.Q<Label>("input-title");
+            _settingsTitle        = root.Q<Label>("settings-title");
+            _outputTitle          = root.Q<Label>("output-title");
+            _computeWarning       = root.Q<Label>("compute-warning");
+            _inputPlaceholder     = root.Q<Label>("preview-input-placeholder");
+            _outputPlaceholder    = root.Q<Label>("preview-output-placeholder");
+            _versionLabel         = root.Q<Label>("version-label");
+
+            _capDropdown         = root.Q<DropdownField>("preview-cap-dropdown");
+            _versionReloadButton = root.Q<Button>("version-reload-button");
+            _langEnButton      = root.Q<Button>("lang-en");
+            _langJaButton      = root.Q<Button>("lang-ja");
+            _autoUpdateButton  = root.Q<Button>("auto-update-button");
+            _updateButton      = root.Q<Button>("update-button");
+            _bevelResetButton  = root.Q<Button>("bevel-reset");
+            _generateButton    = root.Q<Button>("generate-button");
+            _resetAllButton    = root.Q<Button>("reset-all-button");
+
+            _inputField        = root.Q<ObjectField>("input-texture-field");
+            _inputModeField    = root.Q<EnumField>("input-mode-field");
+            _normalTypeField   = root.Q<EnumField>("normal-type-field");
+            _profileField      = root.Q<EnumField>("profile-field");
+            _thresholdSlider   = root.Q<Slider>("threshold-slider");
+            _strengthSlider    = root.Q<Slider>("strength-slider");
+            _bevelRadiusSlider = root.Q<SliderInt>("bevel-radius-slider");
+            _invertMaskToggle  = root.Q<Toggle>("invert-mask-toggle");
+            _ditherToggle      = root.Q<Toggle>("dither-toggle");
+            _bevelToggle       = root.Q<Toggle>("bevel-toggle");
+            _overwriteToggle   = root.Q<Toggle>("overwrite-toggle");
+
+            _bevelContent  = root.Q<VisualElement>("bevel-content");
+            _inputCanvas   = root.Q<VisualElement>("preview-input-canvas");
+            _outputCanvas  = root.Q<VisualElement>("preview-output-canvas");
+            _inputImgui    = root.Q<IMGUIContainer>("preview-input-imgui");
+            _outputImgui   = root.Q<IMGUIContainer>("preview-output-imgui");
+
+            // EnumField は UXML では型を持たないため、ここで初期化する
+            _inputModeField.Init(_settings.InputMode);
+            _normalTypeField.Init(_settings.NormalMapType);
+            _profileField.Init(_settings.ProfileType);
+
+            _capDropdown.choices = new List<string>(CapLabels);
+
+            // ── プレビュー ──
+            _inputImgui.onGUIHandler  = () => DrawPreviewTexture(_inputImgui, _inputTexture);
+            _outputImgui.onGUIHandler = () => DrawPreviewTexture(_outputImgui, _previewCtx?.Result);
+            BindSquareAspect(_inputCanvas);
+            BindSquareAspect(_outputCanvas);
+            BindPreviewNavigation(_inputCanvas);
+            BindPreviewNavigation(_outputCanvas);
+
+            _capDropdown.RegisterValueChangedCallback(_ =>
+            {
+                int i = Mathf.Clamp(_capDropdown.index, 0, CapValues.Length - 1);
+                _previewCap = CapValues[i];
+                EditorPrefs.SetInt(PrefKeyCap, _previewCap);
+                MarkPreviewDirty();
+            });
+
+            _autoUpdateButton.clicked += () =>
+            {
+                _autoUpdatePreview = !_autoUpdatePreview;
+                RefreshAutoUpdateButton();
+                if (_autoUpdatePreview) MarkPreviewDirty();
+            };
+
+            _updateButton.clicked += () =>
+            {
+                // Explicit refresh also re-reads the source, so a re-imported
+                // texture is picked up even though its instance ID is unchanged.
+                _previewCtx?.Invalidate();
+                _previewDirty = false;
+                UpdatePreview();
+            };
+
+            // ── 言語 ──
+            _langEnButton.clicked += () => SetLanguage(0);
+            _langJaButton.clicked += () => SetLanguage(1);
+
+            // ── バージョン ──
+            _versionReloadButton.clicked += () =>
+            {
+                NormalmapGeneratorVersion.ForceRecheck();
+                LoadVersionResultFromSessionState();   // 即座に「確認中...」表示へ
+            };
+
+            // ── 入力 ──
+            _inputField.objectType = typeof(Texture2D);
+            _inputField.RegisterValueChangedCallback(evt =>
+            {
+                _inputTexture = evt.newValue as Texture2D;
+                RefreshActionState();
+                MarkPreviewDirty();
+                RefreshPreviewCanvases();
+            });
+
+            // ── 設定 ──
+            _inputModeField.RegisterValueChangedCallback(evt =>
+            {
+                _settings.InputMode = (InputMode)evt.newValue;
+                MarkPreviewDirty();
+            });
+            _thresholdSlider.RegisterValueChangedCallback(evt =>
+            {
+                _settings.Threshold = evt.newValue;
+                MarkPreviewDirty();
+            });
+            _invertMaskToggle.RegisterValueChangedCallback(evt =>
+            {
+                _settings.InvertMask = evt.newValue;
+                MarkPreviewDirty();
+            });
+            _strengthSlider.RegisterValueChangedCallback(evt =>
+            {
+                _settings.Strength = evt.newValue;
+                MarkPreviewDirty();
+            });
+            _normalTypeField.RegisterValueChangedCallback(evt =>
+            {
+                _settings.NormalMapType = (NormalMapType)evt.newValue;
+                MarkPreviewDirty();
+            });
+            _ditherToggle.RegisterValueChangedCallback(evt =>
+            {
+                _settings.Dither = evt.newValue;
+                MarkPreviewDirty();
+            });
+
+            // ── ベベル (トグル付きセクション) ──
+            _bevelToggle.RegisterValueChangedCallback(evt =>
+            {
+                _settings.DisableBevel = !evt.newValue;
+                _bevelContent.SetEnabled(evt.newValue);
+                MarkPreviewDirty();
+            });
+            _bevelContent.SetEnabled(!_settings.DisableBevel);
+
+            _bevelRadiusSlider.RegisterValueChangedCallback(evt =>
+            {
+                _settings.BevelRadius = evt.newValue;
+                MarkPreviewDirty();
+            });
+            _profileField.RegisterValueChangedCallback(evt =>
+            {
+                _settings.ProfileType = (ProfileType)evt.newValue;
+                MarkPreviewDirty();
+            });
+            _bevelResetButton.clicked += () =>
+            {
+                var def = new NormalMapSettings();
+                _settings.BevelRadius = def.BevelRadius;
+                _settings.ProfileType = def.ProfileType;
+                _bevelRadiusSlider.value = Mathf.RoundToInt(_settings.BevelRadius);
+                _profileField.value      = _settings.ProfileType;
+            };
+
+            // ── 出力 ──
+            _overwriteToggle.RegisterValueChangedCallback(evt =>
+                _settings.OverwriteExisting = evt.newValue);
+            _generateButton.clicked += GenerateNormalMap;
+            _resetAllButton.clicked += () =>
+            {
+                if (EditorUtility.DisplayDialog(
+                    L("ResetConfirmTitle"), L("ResetConfirmMsg"), L("Yes"), L("No")))
+                    ResetAll();
+            };
+
+            SyncUIFromSettings();
+            ApplyLocalization();
+            RefreshLanguageButtons();
+            RefreshAutoUpdateButton();
+            RefreshActionState();
+            RefreshPreviewCanvases();
+            SetStatus("Ready", StatusType.Info);
+            MarkPreviewDirty();
+            StartVersionCheck();
+        }
+
+        /// <summary>設定値を UI コントロールへ反映する（リセット時・初期化時）。</summary>
+        private void SyncUIFromSettings()
+        {
+            _inputField.SetValueWithoutNotify(_inputTexture);
+            _capDropdown.index       = Mathf.Max(0, System.Array.IndexOf(CapValues, _previewCap));
+            _inputModeField.value    = _settings.InputMode;
+            _thresholdSlider.value   = _settings.Threshold;
+            _invertMaskToggle.value  = _settings.InvertMask;
+            _strengthSlider.value    = _settings.Strength;
+            _normalTypeField.value   = _settings.NormalMapType;
+            _ditherToggle.value      = _settings.Dither;
+            _bevelToggle.value       = !_settings.DisableBevel;
+            _bevelRadiusSlider.value = Mathf.RoundToInt(_settings.BevelRadius);
+            _profileField.value      = _settings.ProfileType;
+            _overwriteToggle.value   = _settings.OverwriteExisting;
+            _bevelContent.SetEnabled(!_settings.DisableBevel);
+        }
+
         // ── Localization ─────────────────────────────────────────────────────
         private void LoadLocalization(string lang)
         {
@@ -115,6 +390,145 @@ namespace NormalmapGenerator
         private string L(string key) =>
             _locDict.TryGetValue(key, out string val) ? val : key;
 
+        private void SetLanguage(int index)
+        {
+            if (index < 0 || index >= _languages.Length || index == _langIndex) return;
+            _langIndex = index;
+            EditorPrefs.SetInt(PrefKeyLang, _langIndex);
+            LoadLocalization(_languages[_langIndex]);
+            ApplyLocalization();
+            RefreshLanguageButtons();
+        }
+
+        /// <summary>ローカライズ文字列を全コントロールへ流し込む。</summary>
+        private void ApplyLocalization()
+        {
+            if (_statusLabel == null) return;
+
+            _previewTitle.text        = L("PreviewHeader");
+            _previewCapLabel.text     = L("PreviewRes");
+            _autoUpdateButton.text    = L("AutoUpdate");
+            _updateButton.text        = L("Update");
+            _previewInputCaption.text = L("InputHeader");
+
+            _inputTitle.text    = L("InputHeader");
+            _inputField.label   = L("MaskTexture");
+
+            _settingsTitle.text      = L("SettingsHeader");
+            _inputModeField.label    = L("InputMode");
+            _thresholdSlider.label   = L("Threshold");
+            _invertMaskToggle.label  = L("InvertMask");
+            _strengthSlider.label    = L("Strength");
+            _normalTypeField.label   = L("NormalType");
+            _ditherToggle.label      = L("Dither");
+
+            _bevelToggle.text        = L("BevelHeader");
+            _bevelRadiusSlider.label = L("BevelRadius");
+            _profileField.label      = L("Profile");
+
+            _outputTitle.text     = L("OutputHeader");
+            _overwriteToggle.text = L("OverwriteIfSameName");
+            _generateButton.text  = L("GenerateBtn");
+            _resetAllButton.text  = L("ResetAll");
+            _computeWarning.text  = L("ComputeShaderNotFound");
+
+            _versionReloadButton.tooltip = L("VersionRecheck");
+            ApplyVersionLabel();   // 接尾辞 (更新あり/確認中/取得失敗) も言語に追従させる
+
+            UpdatePreviewHint();
+        }
+
+        private void RefreshLanguageButtons()
+        {
+            _langEnButton.EnableInClassList("dennoko-button-active", _langIndex == 0);
+            _langJaButton.EnableInClassList("dennoko-button-active", _langIndex == 1);
+        }
+
+        private void RefreshAutoUpdateButton()
+        {
+            _autoUpdateButton.EnableInClassList("dennoko-button-active", _autoUpdatePreview);
+        }
+
+        private void RefreshActionState()
+        {
+            bool computeMissing = _computeShader == null;
+            _computeWarning.EnableInClassList("nmg-hidden", !computeMissing);
+            _generateButton.SetEnabled(_inputTexture != null && _processor != null);
+        }
+
+        // ── Version / update check ───────────────────────────────────────────
+
+        private void StartVersionCheck()
+        {
+            LoadVersionResultFromSessionState();
+            // 取得の要否は StartCheckBackgroundTask 内で判定する（成功済みなら何もしない／
+            // 前回エラーなら再試行）。開き直すたびに一時的な失敗から自己回復できる。
+            NormalmapGeneratorVersion.StartCheckBackgroundTask();
+        }
+
+        /// <summary>
+        /// セッションに保存された取得結果からラベル表示を組み立てる。
+        /// State（更新有無）はキャッシュせず、常に「現在のローカル版 vs 取得済みの最新版」で
+        /// 再計算する。こうしないとローカル版が後から解決された場合に矛盾表示が残る。
+        /// </summary>
+        internal void LoadVersionResultFromSessionState()
+        {
+            string local  = NormalmapGeneratorVersion.Current;
+            string latest = SessionState.GetString(NormalmapGeneratorVersion.VerCheckLatestKey, string.Empty);
+            bool   done   = SessionState.GetBool(NormalmapGeneratorVersion.VerCheckDoneKey, false);
+            bool   error  = SessionState.GetBool(NormalmapGeneratorVersion.VerCheckErrorKey, false);
+
+            DennokoVersionChecker.State state;
+            if (!done)
+                state = DennokoVersionChecker.State.Checking;
+            else if (error || string.IsNullOrEmpty(latest))
+                state = DennokoVersionChecker.State.Error;
+            else if (DennokoVersionChecker.IsUpdateAvailable(latest, local))
+                state = DennokoVersionChecker.State.UpdateAvailable;
+            else
+                state = DennokoVersionChecker.State.UpToDate;
+
+            _versionResult = new DennokoVersionChecker.Result
+            {
+                State         = state,
+                LocalVersion  = local,
+                LatestVersion = latest,
+                Url           = SessionState.GetString(NormalmapGeneratorVersion.VerCheckUrlKey, string.Empty),
+                Message       = SessionState.GetString(NormalmapGeneratorVersion.VerCheckMessageKey, string.Empty),
+            };
+            ApplyVersionLabel();
+        }
+
+        private void ApplyVersionLabel()
+        {
+            if (_versionLabel == null) return;
+
+            var r = _versionResult;
+            string baseText = "v" + r.LocalVersion;
+            string text;
+            bool update = false, error = false;
+            switch (r.State)
+            {
+                case DennokoVersionChecker.State.UpdateAvailable:
+                    text = baseText + "  " + string.Format(L("VersionUpdateAvailable"), r.LatestVersion);
+                    update = true;
+                    break;
+                case DennokoVersionChecker.State.Error:
+                    text = baseText + "  " + L("VersionCheckFailed");
+                    error = true;
+                    break;
+                case DennokoVersionChecker.State.Checking:
+                    text = baseText + "  " + L("VersionChecking");
+                    break;
+                default: // UpToDate
+                    text = baseText;
+                    break;
+            }
+            _versionLabel.text = text;
+            _versionLabel.EnableInClassList("dennoko-version-label--update", update);
+            _versionLabel.EnableInClassList("dennoko-version-label--error", error);
+        }
+
         // ── ComputeShader ────────────────────────────────────────────────────
         private void LoadComputeShader()
         {
@@ -130,168 +544,150 @@ namespace NormalmapGenerator
                 _processor = new NormalMapProcessor(_computeShader);
         }
 
-        // ── Debounce / Status Reset ───────────────────────────────────────────
+        // ── Debounce ─────────────────────────────────────────────────────────
         private void OnEditorUpdate()
         {
-            if (_previewDirty && EditorApplication.timeSinceStartup - _lastChangeTime > _debounce)
+            if (!_previewDirty) return;
+            if (EditorApplication.timeSinceStartup - _lastChangeTime <= _debounce) return;
+
+            _previewDirty = false;
+            if (_autoUpdatePreview) UpdatePreview();
+        }
+
+        /// <summary>
+        /// プレビュー再生成を予約する。デバウンス時間は、距離場を作り直す必要が
+        /// あるか（heavy）どうかで切り替える。
+        /// </summary>
+        private void MarkPreviewDirty()
+        {
+            _previewDirty   = true;
+            _lastChangeTime = EditorApplication.timeSinceStartup;
+            _debounce       = IsHeavyChange() ? HeavyDebounceSeconds : LightDebounceSeconds;
+        }
+
+        /// <summary>True when the pending change invalidates the distance field.</summary>
+        private bool IsHeavyChange()
+        {
+            if (_appliedSnapshot == null) return true;
+            if (_appliedTexture != _inputTexture) return true;
+            if (_appliedCap != _previewCap) return true;
+            if (_appliedSnapshot.Threshold  != _settings.Threshold)  return true;
+            if (_appliedSnapshot.InvertMask != _settings.InvertMask) return true;
+            // A larger radius needs a wider jump-flood range; a smaller one reuses it.
+            if (_settings.BevelRadius > _appliedSnapshot.BevelRadius) return true;
+            return false;
+        }
+
+        // ── Preview rendering ────────────────────────────────────────────────
+
+        /// <summary>
+        /// IMGUIContainer の中身。テクスチャの描画だけを行い、背景・枠線は USS が持つ。
+        /// UI Toolkit にはテクスチャを UV 指定で描く手段がないためここだけ IMGUI を使う。
+        /// </summary>
+        private void DrawPreviewTexture(IMGUIContainer container, Texture tex)
+        {
+            if (tex == null || Event.current.type != EventType.Repaint) return;
+
+            Rect local = container.contentRect;
+            if (local.width < 1f || local.height < 1f) return;
+
+            Rect area = new Rect(0f, 0f, local.width, local.height);
+            Rect fit  = FitRect(area, (float)tex.width / Mathf.Max(1, tex.height));
+            GUI.DrawTextureWithTexCoords(fit, tex, ComputeUvRect(), true);
+        }
+
+        /// <summary>プレビュー領域を正方形に保つ（USS にアスペクト比指定がないため）。</summary>
+        private static void BindSquareAspect(VisualElement canvas)
+        {
+            canvas.RegisterCallback<GeometryChangedEvent>(evt =>
             {
-                _previewDirty = false;
-                if (_autoUpdatePreview)
+                float w = evt.newRect.width;
+                if (w < 1f) return;
+
+                // 解決後の高さ (max-height でクランプされうる) ではなく、
+                // 自分が最後に設定した値と比べてループを防ぐ。
+                float applied = canvas.style.height.keyword == StyleKeyword.Null
+                    ? -1f
+                    : canvas.style.height.value.value;
+                if (Mathf.Abs(applied - w) < 0.5f) return;
+
+                canvas.style.height = w;
+            });
+        }
+
+        /// <summary>ホイールズーム / ドラッグパン / ダブルクリックリセット。</summary>
+        private void BindPreviewNavigation(VisualElement canvas)
+        {
+            // TrickleDown で登録し、子の IMGUIContainer や親の ScrollView より先に処理する
+            canvas.RegisterCallback<WheelEvent>(evt =>
+            {
+                float before = _zoom;
+                float step   = Mathf.Clamp(evt.delta.y, -3f, 3f);
+                _zoom = Mathf.Clamp(_zoom * Mathf.Exp(-step * 0.15f), 1f, MaxZoom);
+                if (!Mathf.Approximately(before, _zoom)) RefreshPreviewCanvases();
+                evt.StopPropagation();   // ScrollView 側のスクロールを抑止する
+            }, TrickleDown.TrickleDown);
+
+            canvas.RegisterCallback<PointerDownEvent>(evt =>
+            {
+                if (evt.clickCount >= 2)
                 {
-                    UpdatePreview();
-                    Repaint();
+                    _zoom = 1f;
+                    _viewCenter = new Vector2(0.5f, 0.5f);
+                    RefreshPreviewCanvases();
                 }
-            }
-
-            if (_statusResetTime > 0 && EditorApplication.timeSinceStartup > _statusResetTime)
-            {
-                _statusMessage   = "Ready";
-                _statusType      = StatusType.Info;
-                _statusResetTime = -1.0;
-                Repaint();
-            }
-        }
-
-        // ── OnGUI ────────────────────────────────────────────────────────────
-        private void OnGUI()
-        {
-            NormalmapTheme.Initialize();
-
-            // ウィンドウ全面に Surface0 を塗る
-            EditorGUI.DrawRect(new Rect(0, 0, position.width, position.height), NormalmapTheme.Surface0);
-
-            DrawHeader();
-
-            _scroll = EditorGUILayout.BeginScrollView(_scroll);
-            DrawPreviewArea();
-            DrawInputSection();
-            DrawSettingsSection();
-            DrawBevelSection();
-            GUILayout.Space(4);
-            EditorGUILayout.EndScrollView();
-
-            DrawFooter();
-            DrawStatusBar();
-
-            // The preview resolution no longer depends on the window size, so a
-            // resize costs nothing and must not schedule a rebuild.
-            DetectChanges();
-        }
-
-        // ── Header ───────────────────────────────────────────────────────────
-        private void DrawHeader()
-        {
-            // ヘッダー領域の確保
-            Rect headerRect = GUILayoutUtility.GetRect(0, 42, GUILayout.ExpandWidth(true));
-
-            // 背景描画（ノーマルマップらしい青紫）
-            EditorGUI.DrawRect(headerRect, new Color(128/255f, 128/255f, 1f));
-
-            string titleText = "Normalmap Generator";
-
-            // タイトルスタイル（白文字）
-            GUIStyle titleStyle = new GUIStyle(EditorStyles.boldLabel)
-            {
-                fontSize = 18,
-                alignment = TextAnchor.MiddleCenter,
-                normal = { textColor = Color.white }
-            };
-
-            // 縁取りスタイル（黒文字）
-            GUIStyle outlineStyle = new GUIStyle(titleStyle)
-            {
-                normal = { textColor = Color.black }
-            };
-
-            // 縁取りの描画（8方向オフセット）
-            for (int x = -1; x <= 1; x++)
-            {
-                for (int y = -1; y <= 1; y++)
+                else if (evt.button == 0 || evt.button == 2)
                 {
-                    if (x == 0 && y == 0) continue;
-                    Rect offRect = headerRect;
-                    offRect.x += x;
-                    offRect.y += y;
-                    GUI.Label(offRect, titleText, outlineStyle);
+                    canvas.CapturePointer(evt.pointerId);
                 }
-            }
+                evt.StopPropagation();
+            }, TrickleDown.TrickleDown);
 
-            // メインタイトルの描画
-            GUI.Label(headerRect, titleText, titleStyle);
-
-            // 言語切り替えツールバー（背景の上に重ねる）
-            Rect toolbarRect = new Rect(headerRect.xMax - 80, headerRect.y + 11, 72, 20);
-            EditorGUI.BeginChangeCheck();
-            _langIndex = GUI.Toolbar(toolbarRect, _langIndex, new[] { "EN", "JA" }, EditorStyles.miniButton);
-            if (EditorGUI.EndChangeCheck())
+            canvas.RegisterCallback<PointerMoveEvent>(evt =>
             {
-                EditorPrefs.SetInt("NormalMapGenerator_Lang", _langIndex);
-                LoadLocalization(_languages[_langIndex]);
-            }
+                if (!canvas.HasPointerCapture(evt.pointerId) || _zoom <= 1f) return;
 
-            // セパレータはタイトルのすぐ下に
-            DrawSeparator();
+                Rect r = canvas.contentRect;
+                if (r.width < 1f || r.height < 1f) return;
+
+                // 画面 y は下向き、UV y は上向き
+                _viewCenter.x -= evt.deltaPosition.x / r.width  / _zoom;
+                _viewCenter.y += evt.deltaPosition.y / r.height / _zoom;
+                RefreshPreviewCanvases();
+                evt.StopPropagation();
+            }, TrickleDown.TrickleDown);
+
+            canvas.RegisterCallback<PointerUpEvent>(evt =>
+            {
+                if (canvas.HasPointerCapture(evt.pointerId))
+                    canvas.ReleasePointer(evt.pointerId);
+            }, TrickleDown.TrickleDown);
         }
 
-        // ── Preview ──────────────────────────────────────────────────────────
-        private void DrawPreviewArea()
+        /// <summary>2 つのプレビュー面とプレースホルダー・情報行を描き直す。</summary>
+        private void RefreshPreviewCanvases()
         {
-            GUILayout.BeginVertical(NormalmapTheme.CardOuterStyle);
+            if (_inputImgui == null) return;
 
-            // ツールバー行
-            GUILayout.BeginHorizontal(NormalmapTheme.ToolbarStyle);
-            GUILayout.Label(L("PreviewHeader"), NormalmapTheme.SectionHeaderStyle);
-            GUILayout.FlexibleSpace();
+            _inputImgui.MarkDirtyRepaint();
+            _outputImgui.MarkDirtyRepaint();
+            _inputPlaceholder.EnableInClassList("nmg-hidden", _inputTexture != null);
+            _outputPlaceholder.EnableInClassList("nmg-hidden", _previewCtx?.Result != null);
+            UpdatePreviewHint();
+        }
 
-            GUILayout.Label(L("PreviewRes"), NormalmapTheme.CaptionStyle);
-            EditorGUI.BeginChangeCheck();
-            int capIndex = System.Array.IndexOf(CapValues, _previewCap);
-            capIndex = EditorGUILayout.Popup(capIndex < 0 ? 1 : capIndex, CapLabels, GUILayout.Width(60));
-            if (EditorGUI.EndChangeCheck())
-            {
-                _previewCap = CapValues[capIndex];
-                EditorPrefs.SetInt(PrefKeyCap, _previewCap);
-            }
+        private void UpdatePreviewHint()
+        {
+            if (_previewHint == null) return;
 
-            GUILayout.Space(4);
-            _autoUpdatePreview = GUILayout.Toggle(_autoUpdatePreview,
-                L("AutoUpdate"), EditorStyles.miniButton);
-            GUILayout.Space(4);
-            if (GUILayout.Button(L("Update"), EditorStyles.toolbarButton))
-            {
-                // Explicit refresh also re-reads the source, so a re-imported
-                // texture is picked up even though its instance ID is unchanged.
-                _previewCtx?.Invalidate();
-                UpdatePreview();
-                Repaint();
-            }
-            GUILayout.Space(2);
-            GUILayout.EndHorizontal();
+            string text;
+            bool warning = false;
+            if (_inputTexture == null)      text = L("AssignInputTex");
+            else if (_processor == null) { text = L("ComputeShaderNotLoaded"); warning = true; }
+            else                            text = BuildPreviewInfo();
 
-            // プレビュー画像
-            float availableWidth = EditorGUIUtility.currentViewWidth - 40f;
-            float cellWidth  = (availableWidth - 16f) * 0.5f;
-            float cellHeight = cellWidth;
-
-            GUILayout.BeginHorizontal();
-            GUILayout.Space(4);
-            DrawTexturePreview(L("InputHeader"), _inputTexture, cellWidth, cellHeight);
-            GUILayout.Space(8);
-            DrawTexturePreview("Normal Map", _previewCtx?.Result, cellWidth, cellHeight);
-            GUILayout.Space(4);
-            GUILayout.EndHorizontal();
-
-            GUILayout.Space(4);
-
-            if (_inputTexture == null)
-                DrawHintLabel(L("AssignInputTex"), NormalmapTheme.TextTertiary);
-            else if (_processor == null)
-                DrawHintLabel(L("ComputeShaderNotLoaded"), NormalmapTheme.SemanticWarning);
-            else
-                DrawHintLabel(BuildPreviewInfo(), NormalmapTheme.TextTertiary);
-
-            GUILayout.Space(4);
-            GUILayout.EndVertical();
+            _previewHint.text = text;
+            _previewHint.EnableInClassList("dennoko-text-warning", warning);
         }
 
         private string BuildPreviewInfo()
@@ -305,29 +701,6 @@ namespace NormalmapGenerator
                 : $"{Mathf.RoundToInt(_previewScale * 100f)}%";
             string zoom = _zoom > 1.001f ? $" / {L("PreviewZoom")} {_zoom:0.#}×" : "";
             return $"{res}  ({src}, {mode}){zoom}";
-        }
-
-        private void DrawTexturePreview(string label, Texture tex, float w, float h)
-        {
-            GUILayout.BeginVertical(GUILayout.Width(w));
-            GUILayout.Label(label, NormalmapTheme.CaptionStyle, GUILayout.Width(w));
-            Rect rect = GUILayoutUtility.GetRect(w, h, GUILayout.ExpandWidth(false));
-
-            if (tex != null)
-            {
-                EditorGUI.DrawRect(rect, NormalmapTheme.Surface0);
-                Rect fit = FitRect(rect, (float)tex.width / Mathf.Max(1, tex.height));
-                GUI.DrawTextureWithTexCoords(fit, tex, ComputeUvRect(), true);
-                HandlePreviewInput(rect);
-            }
-            else
-            {
-                EditorGUI.DrawRect(rect, NormalmapTheme.Surface0);
-                var centered = new GUIStyle(NormalmapTheme.CaptionStyle)
-                    { alignment = TextAnchor.MiddleCenter };
-                GUI.Label(rect, "—", centered);
-            }
-            GUILayout.EndVertical();
         }
 
         /// <summary>Largest rect inside <paramref name="outer"/> with the given w/h aspect.</summary>
@@ -354,213 +727,28 @@ namespace NormalmapGenerator
             return new Rect(cx - half, cy - half, size, size);
         }
 
-        private void HandlePreviewInput(Rect rect)
-        {
-            Event e = Event.current;
-            if (!rect.Contains(e.mousePosition)) return;
-
-            if (e.type == EventType.ScrollWheel)
-            {
-                float before = _zoom;
-                _zoom = Mathf.Clamp(_zoom * Mathf.Exp(-e.delta.y * 0.1f), 1f, MaxZoom);
-                if (!Mathf.Approximately(before, _zoom))
-                {
-                    e.Use();
-                    Repaint();
-                }
-            }
-            else if (e.type == EventType.MouseDown && e.clickCount == 2)
-            {
-                _zoom = 1f;
-                _viewCenter = new Vector2(0.5f, 0.5f);
-                e.Use();
-                Repaint();
-            }
-            else if (e.type == EventType.MouseDrag && (e.button == 0 || e.button == 2) && _zoom > 1f)
-            {
-                // GUI y grows downward, UV y grows upward.
-                _viewCenter.x -= e.delta.x / rect.width  / _zoom;
-                _viewCenter.y += e.delta.y / rect.height / _zoom;
-                e.Use();
-                Repaint();
-            }
-        }
-
-        private void DrawHintLabel(string text, Color color)
-        {
-            var style = new GUIStyle(NormalmapTheme.CaptionStyle)
-                { normal = { textColor = color } };
-            GUILayout.BeginHorizontal();
-            GUILayout.Space(8);
-            GUILayout.Label(text, style);
-            GUILayout.EndHorizontal();
-        }
-
-        // ── Settings Sections ────────────────────────────────────────────────
-        private void DrawInputSection()
-        {
-            DrawSection(L("InputHeader"), () =>
-            {
-                _inputTexture = (Texture2D)EditorGUILayout.ObjectField(
-                    L("MaskTexture"), _inputTexture, typeof(Texture2D), false);
-            });
-        }
-
-        private void DrawSettingsSection()
-        {
-            DrawSection(L("SettingsHeader"), () =>
-            {
-                _settings.InputMode = (InputMode)EditorGUILayout.EnumPopup(
-                    L("InputMode"), _settings.InputMode);
-                EditorGUILayout.Space(2);
-                _settings.Threshold = EditorGUILayout.Slider(
-                    L("Threshold"), _settings.Threshold, 0f, 1f);
-                _settings.InvertMask = EditorGUILayout.Toggle(
-                    L("InvertMask"), _settings.InvertMask);
-                EditorGUILayout.Space(4);
-                _settings.Strength = EditorGUILayout.Slider(
-                    L("Strength"), _settings.Strength, 0.1f, 50f);
-                _settings.NormalMapType = (NormalMapType)EditorGUILayout.EnumPopup(
-                    L("NormalType"), _settings.NormalMapType);
-                _settings.Dither = EditorGUILayout.Toggle(
-                    L("Dither"), _settings.Dither);
-            });
-        }
-
-        private void DrawBevelSection()
-        {
-            bool bevelEnabled = !_settings.DisableBevel;
-            DrawToggleSection(L("BevelHeader"), ref bevelEnabled, () =>
-            {
-                _settings.BevelRadius = EditorGUILayout.IntSlider(
-                    L("BevelRadius"), Mathf.RoundToInt(_settings.BevelRadius), 1, 100);
-                _settings.ProfileType = (ProfileType)EditorGUILayout.EnumPopup(
-                    L("Profile"), _settings.ProfileType);
-            }, onReset: () =>
-            {
-                var def = new NormalMapSettings();
-                _settings.BevelRadius = def.BevelRadius;
-                _settings.ProfileType = def.ProfileType;
-            });
-            _settings.DisableBevel = !bevelEnabled;
-        }
-
-        // ── Footer ───────────────────────────────────────────────────────────
-        private void DrawFooter()
-        {
-            GUILayout.BeginVertical(NormalmapTheme.CardStyle);
-
-            // 出力設定行
-            GUILayout.BeginHorizontal();
-            GUILayout.Label(L("OutputHeader"), NormalmapTheme.SectionHeaderStyle);
-            GUILayout.FlexibleSpace();
-            _settings.OverwriteExisting = EditorGUILayout.ToggleLeft(
-                L("OverwriteIfSameName"), _settings.OverwriteExisting,
-                NormalmapTheme.SecondaryTextStyle, GUILayout.Width(220));
-            GUILayout.EndHorizontal();
-
-            DrawSeparator();
-
-            if (_computeShader == null)
-            {
-                var warnStyle = new GUIStyle(NormalmapTheme.CaptionStyle)
-                    { normal = { textColor = NormalmapTheme.SemanticWarning } };
-                GUILayout.Label(L("ComputeShaderNotFound"), warnStyle);
-                EditorGUILayout.Space(4);
-            }
-
-            bool canGenerate = _inputTexture != null && _processor != null;
-            using (new EditorGUI.DisabledGroupScope(!canGenerate))
-            {
-                if (GUILayout.Button(L("GenerateBtn"), NormalmapTheme.ActionButtonStyle))
-                    GenerateNormalMap();
-            }
-
-            EditorGUILayout.Space(4);
-
-            if (GUILayout.Button(L("ResetAll"), NormalmapTheme.SecondaryButtonStyle))
-            {
-                if (EditorUtility.DisplayDialog(
-                    L("ResetConfirmTitle"), L("ResetConfirmMsg"), L("Yes"), L("No")))
-                    ResetAll();
-            }
-
-            GUILayout.EndVertical();
-        }
-
         // ── Status bar ───────────────────────────────────────────────────────
-        private void DrawStatusBar()
+
+        /// <summary>ステータスを表示する。Info 以外は 3 秒後に Ready へ自動復帰。</summary>
+        private void SetStatus(string message, StatusType type, long autoResetMs = 3000)
         {
-            var style = _statusType switch
+            if (_statusLabel == null) return;
+
+            _statusLabel.text = message;
+            _statusLabel.EnableInClassList("dennoko-status--success", type == StatusType.Success);
+            _statusLabel.EnableInClassList("dennoko-status--error",   type == StatusType.Error);
+            _statusLabel.EnableInClassList("dennoko-status--warning", type == StatusType.Warning);
+
+            _statusResetSchedule?.Pause();
+            if (type != StatusType.Info)
             {
-                StatusType.Success => NormalmapTheme.StatusSuccessStyle,
-                StatusType.Error   => NormalmapTheme.StatusErrorStyle,
-                StatusType.Warning => NormalmapTheme.StatusWarningStyle,
-                _                  => NormalmapTheme.StatusInfoStyle,
-            };
-            GUILayout.Box(_statusMessage, style, GUILayout.ExpandWidth(true));
-        }
-
-        // ── Section helpers ──────────────────────────────────────────────────
-
-        /// <summary>常時表示の設定セクション。</summary>
-        private void DrawSection(string title, System.Action content)
-        {
-            GUILayout.BeginVertical(NormalmapTheme.CardStyle);
-            GUILayout.Label(title, NormalmapTheme.SectionHeaderStyle);
-            DrawSeparator();
-            content?.Invoke();
-            GUILayout.EndVertical();
-        }
-
-        /// <summary>
-        /// ON/OFF トグル付きセクション。
-        /// OFF 時もコンテンツは表示されグレーアウトされる（設定値が保持されていることを示す）。
-        /// </summary>
-        private void DrawToggleSection(string title, ref bool toggle,
-            System.Action content, System.Action onReset = null)
-        {
-            GUILayout.BeginVertical(NormalmapTheme.CardStyle);
-
-            GUILayout.BeginHorizontal();
-            var headerStyle = toggle
-                ? NormalmapTheme.ToggleSectionOnStyle
-                : NormalmapTheme.ToggleSectionOffStyle;
-
-            EditorGUI.BeginChangeCheck();
-            bool newToggle = EditorGUILayout.ToggleLeft(
-                title, toggle, headerStyle, GUILayout.ExpandWidth(true));
-            if (EditorGUI.EndChangeCheck())
-            {
-                toggle = newToggle;
-                Repaint();
+                _statusResetSchedule = _statusLabel.schedule
+                    .Execute(() => SetStatus("Ready", StatusType.Info))
+                    .StartingIn(autoResetMs);
             }
-
-            if (onReset != null &&
-                GUILayout.Button("Reset", NormalmapTheme.MiniButtonStyle, GUILayout.Width(50)))
-            {
-                onReset.Invoke();
-                GUI.FocusControl(null);
-            }
-            GUILayout.EndHorizontal();
-
-            DrawSeparator();
-
-            using (new EditorGUI.DisabledGroupScope(!toggle))
-                content?.Invoke();
-
-            GUILayout.EndVertical();
         }
 
-        /// <summary>Outline 色の 1px 横区切り線。</summary>
-        private void DrawSeparator()
-        {
-            var rect = GUILayoutUtility.GetRect(0, 1, GUILayout.ExpandWidth(true));
-            EditorGUI.DrawRect(rect, NormalmapTheme.Outline);
-            EditorGUILayout.Space(4);
-        }
-
-        // ── Generate ─────────────────────────────────────────────────────────
+        // ── Actions ──────────────────────────────────────────────────────────
         private void GenerateNormalMap()
         {
             if (_inputTexture == null || _processor == null) return;
@@ -580,82 +768,27 @@ namespace NormalmapGenerator
                 EditorUtility.ClearProgressBar();
             }
             UpdatePreview();
-            Repaint();
         }
 
         private void ResetAll()
         {
-            _settings = new NormalMapSettings();
-            _zoom = 1f;
+            _settings   = new NormalMapSettings();
+            _zoom       = 1f;
             _viewCenter = new Vector2(0.5f, 0.5f);
+            SyncUIFromSettings();
+            RefreshPreviewCanvases();
             SetStatus("Reset.", StatusType.Info);
-        }
-
-        private void SetStatus(string message, StatusType type, double autoResetSeconds = 3.0)
-        {
-            _statusMessage   = message;
-            _statusType      = type;
-            _statusResetTime = type == StatusType.Info
-                ? -1.0
-                : EditorApplication.timeSinceStartup + autoResetSeconds;
-            Repaint();
-        }
-
-        // ── Change detection ─────────────────────────────────────────────────
-
-        /// <summary>
-        /// Schedules a preview rebuild when the UI state actually differs from
-        /// the last state we saw. Comparing against a snapshot (rather than
-        /// EditorGUI.BeginChangeCheck) keeps the debounce timer from being reset
-        /// on every repaint while a change is still pending.
-        /// </summary>
-        private void DetectChanges()
-        {
-            bool changed = _pendingSnapshot == null
-                        || _pendingTexture != _inputTexture
-                        || _pendingCap != _previewCap
-                        || !SettingsEqual(_pendingSnapshot, _settings);
-            if (!changed) return;
-
-            _pendingSnapshot = _settings.Clone();
-            _pendingTexture  = _inputTexture;
-            _pendingCap      = _previewCap;
-
-            _previewDirty   = true;
-            _lastChangeTime = EditorApplication.timeSinceStartup;
-            _debounce       = IsHeavyChange() ? HeavyDebounceSeconds : LightDebounceSeconds;
-        }
-
-        /// <summary>True when the pending change invalidates the distance field.</summary>
-        private bool IsHeavyChange()
-        {
-            if (_appliedSnapshot == null) return true;
-            if (_appliedTexture != _inputTexture) return true;
-            if (_appliedCap != _previewCap) return true;
-            if (_appliedSnapshot.Threshold  != _settings.Threshold)  return true;
-            if (_appliedSnapshot.InvertMask != _settings.InvertMask) return true;
-            // A larger radius needs a wider jump-flood range; a smaller one reuses it.
-            if (_settings.BevelRadius > _appliedSnapshot.BevelRadius) return true;
-            return false;
-        }
-
-        private static bool SettingsEqual(NormalMapSettings a, NormalMapSettings b)
-        {
-            return a.InputMode     == b.InputMode
-                && a.Threshold     == b.Threshold
-                && a.BevelRadius   == b.BevelRadius
-                && a.Strength      == b.Strength
-                && a.ProfileType   == b.ProfileType
-                && a.NormalMapType == b.NormalMapType
-                && a.InvertMask    == b.InvertMask
-                && a.DisableBevel  == b.DisableBevel
-                && a.Dither        == b.Dither;
+            MarkPreviewDirty();
         }
 
         // ── Preview update ───────────────────────────────────────────────────
         private void UpdatePreview()
         {
-            if (_inputTexture == null || _processor == null) return;
+            if (_inputTexture == null || _processor == null)
+            {
+                RefreshPreviewCanvases();
+                return;
+            }
 
             _previewCtx ??= new PipelineContext(generateMips: true);
 
@@ -689,6 +822,8 @@ namespace NormalmapGenerator
                 Debug.LogError($"[NormalMapGenerator] Preview error: {ex.Message}\n{ex.StackTrace}");
                 SetStatus($"Preview error: {ex.Message}", StatusType.Error);
             }
+
+            RefreshPreviewCanvases();
         }
 
         /// <summary>

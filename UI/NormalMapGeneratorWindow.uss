@@ -1,0 +1,181 @@
+/* ============================================================
+   NormalMapGeneratorWindow.uss
+   Normalmap Generator 固有のスタイル。
+
+   DennokoTheme.uss の「後」に読み込むこと（同詳細度は後勝ち）。
+   - セレクタは必ず .dennoko-root を前置する（詳細度で汎用リセットに勝たせる）
+   - カラーは var(--dennoko-*) を経由し、カラーコードを直書きしない
+   ============================================================ */
+
+/* ─── 汎用ユーティリティ ─────────────────────────────────── */
+
+/* 伸びて「縮む」列。flex-grow だけだと幅超過時に隣の要素が枠外へ押し出される */
+.dennoko-root .nmg-col-grow {
+    flex-grow: 1;
+    flex-shrink: 1;
+    overflow: hidden;
+}
+
+/* 横並び行 */
+.dennoko-root .nmg-row {
+    flex-direction: row;
+    align-items: center;
+}
+
+/* 両端配置の横並び行 */
+.dennoko-root .nmg-row-spread {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+}
+
+/* 表示・非表示の切り替え（C# からは EnableInClassList で付け外しする） */
+.dennoko-root .nmg-hidden {
+    display: none;
+}
+
+/* 補足テキスト（プレビュー情報・警告文など） */
+.dennoko-root .nmg-hint {
+    font-size: 10px;
+    color: var(--dennoko-text-tertiary);
+    white-space: normal;
+    margin: 6px 2px 0 2px;
+}
+
+/* この USS はテーマの後に読み込まれるため、.dennoko-text-* (0,2,0) は
+   .nmg-hint (0,2,0) に後勝ちで負ける。クラス連結 (0,3,0) で色を取り戻す。 */
+.dennoko-root .nmg-hint.dennoko-text-warning { color: var(--dennoko-semantic-warning); }
+.dennoko-root .nmg-hint.dennoko-text-error   { color: var(--dennoko-semantic-error); }
+.dennoko-root .nmg-hint.dennoko-text-info    { color: var(--dennoko-semantic-info); }
+
+/* 小見出し（プレビューペインのキャプション等） */
+.dennoko-root .nmg-caption {
+    font-size: 10px;
+    color: var(--dennoko-text-tertiary);
+    margin-bottom: 4px;
+}
+
+/* ─── ヘッダー: 言語切り替え ──────────────────────────────── */
+
+.dennoko-root .nmg-lang-group {
+    flex-direction: row;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.dennoko-root .unity-button.nmg-lang-button {
+    font-size: 10px;
+    height: 20px;
+    width: 34px;
+    padding: 0;
+    margin: 0 0 0 4px;
+}
+
+/* ─── プレビューカード ───────────────────────────────────── */
+
+/* ツールバーをカード上端へ密着させるため、カードの角丸から中身をはみ出させない */
+.dennoko-root .nmg-card-flush {
+    overflow: hidden;
+    padding-top: 0;
+}
+
+/* 上部固定領域（プレビュー）。ヘッダー・フッターと同じくウィンドウ縮小時に潰さない。
+   縮むのは .dennoko-scroll だけにする。 */
+.dennoko-root .nmg-pinned {
+    flex-shrink: 0;
+}
+
+/* カード上端に密着するツールバー行（カードの padding を打ち消す） */
+.dennoko-root .nmg-toolbar {
+    margin: 0 -12px 10px -12px;
+    border-bottom-width: 1px;
+    border-bottom-color: var(--dennoko-outline);
+    flex-shrink: 0;
+}
+
+.dennoko-root .nmg-toolbar-label {
+    margin-right: 4px;
+    flex-shrink: 0;
+}
+
+.dennoko-root .unity-button.nmg-toolbar-button {
+    font-size: 10px;
+    height: 20px;
+    padding: 0 8px;
+    margin: 0 0 0 4px;
+    flex-shrink: 0;
+}
+
+/* ツールバー内のドロップダウン（プレビュー解像度上限） */
+.dennoko-root .nmg-cap-dropdown {
+    width: 64px;
+    flex-shrink: 0;
+    margin: 0;
+}
+
+.dennoko-root .nmg-cap-dropdown .unity-base-field__input {
+    padding: 1px 4px;
+    font-size: 10px;
+}
+
+/* プレビュー 2 ペインの並び */
+.dennoko-root .nmg-preview-row {
+    flex-direction: row;
+}
+
+.dennoko-root .nmg-preview-pane {
+    flex-grow: 1;
+    flex-shrink: 1;
+    overflow: hidden;
+}
+
+.dennoko-root .nmg-preview-pane--left {
+    margin-right: 4px;
+}
+
+.dennoko-root .nmg-preview-pane--right {
+    margin-left: 4px;
+}
+
+/* 画像の下敷き。高さは正方形になるよう C# が幅に合わせて設定する。
+   プレビューは上部固定なので、広いウィンドウで設定エリアを圧迫しないよう
+   max-height で頭打ちにする（それ以上はレターボックスになる）。 */
+.dennoko-root .nmg-preview-canvas {
+    background-color: var(--dennoko-surface-0);
+    border-color: var(--dennoko-outline);
+    border-width: 1px;
+    border-radius: 4px;
+    min-height: 80px;
+    max-height: 240px;
+    overflow: hidden;
+}
+
+/* テクスチャ描画用の IMGUIContainer。下敷きいっぱいに重ねる */
+.dennoko-root .nmg-preview-imgui {
+    position: absolute;
+    left: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+}
+
+/* テクスチャ未設定時のプレースホルダー */
+.dennoko-root .nmg-preview-placeholder {
+    flex-grow: 1;
+    -unity-text-align: middle-center;
+    color: var(--dennoko-text-disabled);
+}
+
+/* ─── フォーム ───────────────────────────────────────────── */
+
+/* トグルで制御される項目は枠で囲まず、インデントだけで従属を示す */
+.dennoko-root .nmg-indent {
+    margin-left: 16px;
+}
+
+/* ─── ステータスバー: 警告 ───────────────────────────────── */
+
+.dennoko-root .dennoko-status--warning {
+    background-color: var(--dennoko-surface-2);
+    color: var(--dennoko-semantic-warning);
+}
