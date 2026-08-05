@@ -83,6 +83,7 @@
    縮むのは .dennoko-scroll だけにする。 */
 .dennoko-root .nmg-pinned {
     flex-shrink: 0;
+    max-height: 450px;
 }
 
 /* カード上端に密着するツールバー行（カードの padding を打ち消す） */
@@ -146,7 +147,7 @@
     border-width: 1px;
     border-radius: 4px;
     min-height: 80px;
-    max-height: 240px;
+    max-height: 360px;
     overflow: hidden;
 }
 
