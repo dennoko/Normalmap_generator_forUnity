@@ -51,6 +51,9 @@ In the Unity menu bar, select **`dennokoworks > Normalmap Generator`**.
 
 - Range: 0.0 – 1.0
 - Pixels **brighter** than this value are treated as foreground (white); darker pixels as background (black).
+- The comparison is made against the value you see in an image editor (display / sRGB space). `0.5` corresponds to the 128/255 gray you would pick with a color picker.
+
+> **Changed behaviour:** earlier versions compared against the linearized value, so `0.5` actually behaved like sRGB 188/255. Projects carried over from those versions may need the threshold lowered to reproduce the previous result.
 
 ### Invert Mask
 
@@ -76,12 +79,17 @@ Selects the cross-sectional shape of the bevel.
 | **Linear** | Uniform slope — the simplest shape. |
 | **Logarithmic** | Steep near the edge, gradually flattening toward the interior. |
 | **Exponential** | Gentle near the edge, becoming steeper toward the interior. |
+| **Smoothstep** | S-curve that flattens out at both ends. The other profiles change slope abruptly where the bevel meets the flat top, which shows up as a thin crease line in the normal map; Smoothstep removes it. |
 
 ### Strength
 
-- Range: 1 – 50
+- Range: 0.1 – 50
 - Controls the intensity (steepness) of the normal deflection.
 - Higher values produce more pronounced surface detail.
+
+### Dither
+
+Adds a ±1/255 dither before the normal map is quantized to 8 bits per channel. Leave it on unless you need bit-exact flat regions: without it, gentle bevel slopes show visible stepping (banding) in the output PNG.
 
 ### Normal Type
 
@@ -118,9 +126,22 @@ The Unity AssetDatabase is refreshed automatically after saving.
 ## Preview
 
 - The input image and the generated normal map are displayed side by side in the window.
-- The preview updates automatically **0.6 seconds** after any parameter change.
-- The preview also updates when the window is resized.
-- Preview processing uses a downscaled resolution that preserves the source aspect ratio. BevelRadius and Strength are scaled accordingly, so the preview closely matches the final output.
+- The preview updates automatically after a parameter change: **0.1 s** for parameters that only affect the last stages (Strength, Profile, Normal Type, Input Mode, and shrinking the Bevel Radius) and **0.3 s** for ones that rebuild the distance field (Threshold, Invert Mask, changing the texture, growing the Bevel Radius).
+- The preview resolution is **min(source resolution, Max)**, where **Max** is the dropdown in the preview toolbar (1024 / 2048 / 4096, default 2048).
+  - A source at or below Max is processed at its native resolution, so the preview is **identical to the saved output**.
+  - A larger source is box-filtered down to Max, and Bevel Radius / Strength are scaled to match.
+- The resolution actually in use is shown below the preview panes.
+- Preview resolution does **not** depend on the window size — resizing the window is free and does not trigger a recomputation.
+
+### Inspecting the preview
+
+| Action | Result |
+|---|---|
+| Mouse wheel over a preview pane | Zoom (1× – 32×) |
+| Drag while zoomed in | Pan |
+| Double-click | Reset to fit |
+
+Both panes share the same zoom and pan, so the input and the normal map stay aligned.
 
 ---
 
@@ -137,4 +158,8 @@ Click **EN / JA** in the top-right corner of the window to switch the UI languag
 | "ComputeShader not found" error | Verify that `NormalMapGenerator.compute` is located in `Assets/Editor/Normalmap_generator/`. |
 | Generate button is disabled | Make sure a Mask Texture has been assigned. |
 | Bevel appears along the image edges | The image should have black (background) pixels at its borders. White pixels that touch the image boundary will not receive bevel. |
-| Preview differs from the generated output | Making the window larger increases preview resolution and improves accuracy. |
+| Preview differs from the generated output | Only possible when the source is larger than the **Max** setting. Raise Max (or lower the source resolution) to make the two match exactly. |
+| Preview looks stale after re-importing the texture | Press **Update** in the preview toolbar; it forces a full rebuild rather than reusing the cached stages. |
+| Preview is slow on a large texture | Lower **Max**. Most parameters only re-run the final stages, but Threshold / Invert / a larger Bevel Radius rebuild the distance field, which is the expensive part. |
+| Banding or stepping on gentle slopes | Make sure **Dither** is enabled. |
+| A thin crease line where the bevel meets the flat area | Use the **Smoothstep** profile — Linear / Logarithmic / Exponential change slope abruptly at the top of the bevel. |
