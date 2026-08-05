@@ -18,6 +18,8 @@
     { "key": "GenerateBtn",           "value": "Generate Normal Map" },
     { "key": "GenerateProcessing",    "value": "Processing..." },
     { "key": "GenerateSuccess",       "value": "Normal map saved successfully." },
+    { "key": "GenerateSkipped",       "value": "Skipped (file already exists)." },
+    { "key": "GenerateFailed",        "value": "Failed to save normal map." },
     { "key": "ResetAll",              "value": "Reset All" },
     { "key": "ResetConfirmTitle",     "value": "Reset" },
     { "key": "ResetConfirmMsg",       "value": "Reset all parameters to defaults?" },

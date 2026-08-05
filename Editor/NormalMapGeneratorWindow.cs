@@ -375,7 +375,8 @@ namespace NormalmapGenerator
         private void LoadLocalization(string lang)
         {
             _locDict.Clear();
-            string path = $"Assets/Editor/Normalmap_generator/Localization/{lang}.json";
+            string scriptDir = GetScriptDirectory();
+            string path = $"{scriptDir}/Localization/{lang}.json";
             TextAsset ta = AssetDatabase.LoadAssetAtPath<TextAsset>(path);
             if (ta != null)
             {
@@ -385,6 +386,20 @@ namespace NormalmapGenerator
                         if (!string.IsNullOrEmpty(pair.key))
                             _locDict[pair.key] = pair.value;
             }
+        }
+
+        private string GetScriptDirectory()
+        {
+            MonoScript ms = MonoScript.FromScriptableObject(this);
+            if (ms != null)
+            {
+                string scriptPath = AssetDatabase.GetAssetPath(ms);
+                if (!string.IsNullOrEmpty(scriptPath))
+                {
+                    return System.IO.Path.GetDirectoryName(scriptPath)?.Replace('\\', '/');
+                }
+            }
+            return "Assets/dennokoworks/Normalmap_generator/Editor";
         }
 
         private string L(string key) =>
@@ -755,8 +770,19 @@ namespace NormalmapGenerator
             try
             {
                 EditorUtility.DisplayProgressBar("Normalmap Generator", L("GenerateProcessing"), 0.0f);
-                _processor.ProcessAndSave(_inputTexture, _settings);
-                SetStatus(L("GenerateSuccess"), StatusType.Success);
+                SaveResult result = _processor.ProcessAndSave(_inputTexture, _settings);
+                if (result == SaveResult.Saved)
+                {
+                    SetStatus(L("GenerateSuccess"), StatusType.Success);
+                }
+                else if (result == SaveResult.Skipped)
+                {
+                    SetStatus(L("GenerateSkipped"), StatusType.Warning);
+                }
+                else
+                {
+                    SetStatus(L("GenerateFailed"), StatusType.Error);
+                }
             }
             catch (System.Exception ex)
             {

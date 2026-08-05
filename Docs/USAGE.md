@@ -155,7 +155,7 @@ Click **EN / JA** in the top-right corner of the window to switch the UI languag
 
 | Symptom | Solution |
 |---|---|
-| "ComputeShader not found" error | Verify that `NormalMapGenerator.compute` is located in `Assets/Editor/Normalmap_generator/`. |
+| "ComputeShader not found" error | Verify that `NormalMapGenerator.compute` is located in the `Editor/` folder. |
 | Generate button is disabled | Make sure a Mask Texture has been assigned. |
 | Bevel appears along the image edges | The image should have black (background) pixels at its borders. White pixels that touch the image boundary will not receive bevel. |
 | Preview differs from the generated output | Only possible when the source is larger than the **Max** setting. Raise Max (or lower the source resolution) to make the two match exactly. |

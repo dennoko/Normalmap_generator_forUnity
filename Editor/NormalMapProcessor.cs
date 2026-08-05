@@ -12,6 +12,7 @@ namespace NormalmapGenerator
     // Smoothstep is appended last so existing serialized values keep meaning.
     public enum ProfileType  { Linear, Logarithmic, Exponential, Smoothstep }
     public enum NormalMapType { DirectX, OpenGL }
+    public enum SaveResult   { Saved, Skipped, Failed }
 
     // ================================================================
     // Settings container
@@ -432,13 +433,13 @@ namespace NormalmapGenerator
         //   Runs the same pipeline at the source's native resolution, saves
         //   the result, refreshes AssetDatabase.
         // ----------------------------------------------------------------
-        public void ProcessAndSave(Texture2D inputTex, NormalMapSettings s)
+        public SaveResult ProcessAndSave(Texture2D inputTex, NormalMapSettings s)
         {
             string assetPath = AssetDatabase.GetAssetPath(inputTex);
             if (string.IsNullOrEmpty(assetPath))
             {
                 Debug.LogError("[NormalMapGenerator] Input texture is not an asset.");
-                return;
+                return SaveResult.Failed;
             }
 
             string dir  = Path.GetDirectoryName(assetPath).Replace('\\', '/');
@@ -447,22 +448,58 @@ namespace NormalmapGenerator
 
             EnsureDirectory(outputDir);
 
-            string outputAssetPath = outputDir + "/" + name + "_normal.png";
+            string baseName = name + "_normal";
+            string outputAssetPath = outputDir + "/" + baseName + ".png";
 
             if (!s.OverwriteExisting && File.Exists(ToPhysicalPath(outputAssetPath)))
             {
-                Debug.Log($"[NormalMapGenerator] Skipped (already exists): {outputAssetPath}");
-                return;
+                int index = 1;
+                while (File.Exists(ToPhysicalPath($"{outputDir}/{baseName} {index}.png")))
+                {
+                    index++;
+                }
+                outputAssetPath = $"{outputDir}/{baseName} {index}.png";
             }
 
-            using (var ctx = new PipelineContext())
+            try
             {
-                RenderTexture rt = Run(ctx, inputTex, s, inputTex.width, inputTex.height);
-                SaveColorRT(rt, ToPhysicalPath(outputAssetPath));
-            }
+                using (var ctx = new PipelineContext())
+                {
+                    RenderTexture rt = Run(ctx, inputTex, s, inputTex.width, inputTex.height);
+                    SaveColorRT(rt, ToPhysicalPath(outputAssetPath));
+                }
 
-            AssetDatabase.Refresh();
-            Debug.Log($"[NormalMapGenerator] Saved: {outputAssetPath}");
+                AssetDatabase.ImportAsset(outputAssetPath, ImportAssetOptions.ForceUpdate);
+
+                TextureImporter importer = AssetImporter.GetAtPath(outputAssetPath) as TextureImporter;
+                if (importer != null)
+                {
+                    bool needsReimport = false;
+                    if (importer.textureType != TextureImporterType.NormalMap)
+                    {
+                        importer.textureType = TextureImporterType.NormalMap;
+                        needsReimport = true;
+                    }
+                    if (importer.sRGBTexture)
+                    {
+                        importer.sRGBTexture = false;
+                        needsReimport = true;
+                    }
+                    if (needsReimport)
+                    {
+                        importer.SaveAndReimport();
+                    }
+                }
+
+                AssetDatabase.Refresh();
+                Debug.Log($"[NormalMapGenerator] Saved: {outputAssetPath}");
+                return SaveResult.Saved;
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogError($"[NormalMapGenerator] Save failed: {ex.Message}\n{ex.StackTrace}");
+                return SaveResult.Failed;
+            }
         }
 
         // ----------------------------------------------------------------

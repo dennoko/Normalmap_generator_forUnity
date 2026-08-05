@@ -158,7 +158,7 @@ Unity メニューバーから **`dennokoworks > Normalmap Generator`** を選�
 
 | 症状 | 対処法 |
 |---|---|
-| 「ComputeShaderが見つかりません」と表示される | `NormalMapGenerator.compute` が `Assets/Editor/Normalmap_generator/` フォルダ内にあるか確認してください。 |
+| 「ComputeShaderが見つかりません」と表示される | `NormalMapGenerator.compute` が `Editor/` フォルダ内に正しく配置されているか確認してください。 |
 | 生成ボタンが押せない | マスク用テクスチャが割り当てられていない可能性があります。 |
 | 外周にもベベルがかかる | 画像の外周に白いピクセルが接していないか確認してください。外周は黒（背景）にしてください。 |
 | プレビューと生成結果が異なる | 元画像が**上限**設定より大きい場合のみ発生します。上限を上げると完全に一致します。 |

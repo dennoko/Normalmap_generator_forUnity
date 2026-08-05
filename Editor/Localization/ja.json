@@ -18,6 +18,8 @@
     { "key": "GenerateBtn",           "value": "ノーマルマップを生成" },
     { "key": "GenerateProcessing",    "value": "処理中..." },
     { "key": "GenerateSuccess",       "value": "ノーマルマップを保存しました。" },
+    { "key": "GenerateSkipped",       "value": "同名ファイルが存在するため保存をスキップしました。" },
+    { "key": "GenerateFailed",        "value": "保存中にエラーが発生しました。" },
     { "key": "ResetAll",              "value": "全てリセット" },
     { "key": "ResetConfirmTitle",     "value": "リセット" },
     { "key": "ResetConfirmMsg",       "value": "全てのパラメータをデフォルトに戻しますか？" },
