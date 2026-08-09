@@ -13,7 +13,7 @@ namespace NormalmapGenerator
     internal static class NormalmapGeneratorVersion
     {
         // version.json の GUID (アセット移動に対応するため GUID 経由でパス解決する)
-        private const string VersionJsonGuid = "3a7e5d1c9b4f42e8a6c0d2b8f5e1a739";
+        private const string VersionJsonGuid = "e8fc01cbe32233747bbbf5421aa27554";
         // version.json をどうしても読めなかった場合の最終フォールバック（通常は使われない）
         private const string FallbackVersion = "0.0.0";
         private static string _currentCache = null;
